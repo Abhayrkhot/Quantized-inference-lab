@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qlab"
+version = "0.1.0"
+description = "Post-training quantization of LLMs from scratch: RTN, GPTQ, AWQ, SmoothQuant, a Triton W4A16 kernel and vLLM serving benchmarks"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.4", "numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+model = ["transformers>=4.51", "datasets>=3", "accelerate>=1", "pyyaml>=6", "matplotlib>=3.8"]
+
+[project.scripts]
+qlab = "qlab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qlab*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "BLE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "model: downloads a Hugging Face model or dataset",
+]

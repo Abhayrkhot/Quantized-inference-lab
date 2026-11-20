@@ -1,0 +1,4 @@
+# Installed with --no-deps. The base image pins nvidia-nccl-cu13 newer than torch's metadata
+# allows, so pip cannot resolve anything that depends on torch against the image's own
+# versions. These packages' dependencies (torch, numpy, packaging) are already in the image.
+bitsandbytes==0.50.2

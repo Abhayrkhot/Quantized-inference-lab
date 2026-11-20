@@ -1,0 +1,6 @@
+# Extras on top of vllm/vllm-openai:v0.34.0. The image's own packages (torch, triton,
+# transformers, vllm, numpy, ...) are held at their shipped versions via a constraints file.
+datasets
+lm-eval
+matplotlib
+ruff
