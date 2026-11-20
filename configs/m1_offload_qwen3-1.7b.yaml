@@ -1,0 +1,13 @@
+# M1: the block-offload path on a model whose bf16 weights (3.4 GB) do not fit beside
+# activations on the 4 GB GPU. One decoder block is on the GPU at a time.
+name: m1_offload
+model: Qwen/Qwen3-1.7B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: true
+datasets: [wikitext2]
+runs:
+  - {method: baseline}
+  - {method: rtn, bits: 4, granularity: g128, symmetric: false}
+  - {method: rtn, bits: 4, granularity: channel, symmetric: false}

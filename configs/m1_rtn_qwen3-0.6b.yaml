@@ -1,0 +1,20 @@
+# M1: round-to-nearest baselines on Qwen3-0.6B-Base (development box, 4 GB GPU).
+name: m1_rtn
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: false
+datasets: [wikitext2, c4]
+runs:
+  - {method: baseline}
+  - sweep:
+      method: [rtn]
+      bits: [8, 4, 3]
+      granularity: [tensor, channel, g128, g64, g32]
+      symmetric: [true, false]
+  # W8A8: per-channel int8 weights, int8 activations with one scale per sequence vs per token.
+  - {method: rtn, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: tensor}
+  - {method: rtn, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: token}
+  - {method: baseline, act_bits: 8, act_granularity: tensor}
+  - {method: baseline, act_bits: 8, act_granularity: token}
