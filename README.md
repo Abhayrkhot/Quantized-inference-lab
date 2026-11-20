@@ -70,7 +70,7 @@ the few large columns. Small groups confine the damage to the groups that contai
 | int3 channel asym | 3.005 | 9.00e-02 | 10.5 | 1.12e+00 | 6.5 |
 | int3 g128 asym | 3.148 | 4.65e-02 | 13.3 | 4.64e-01 | 10.3 |
 
-<sub>Source: `results/box/m0_simulate.csv` · CPU · torch 2.14.0 · git a1a57e1-dirty · 2026-11-20</sub>
+<sub>Source: `results/box/m0_simulate.csv` · CPU · torch 2.14.0 · git d5c42f8 · 2026-11-20</sub>
 <!-- qlab:end m0_simulate -->
 
 The CSV also has the symmetric variants and SQNR for every format. Synthetic matrices only

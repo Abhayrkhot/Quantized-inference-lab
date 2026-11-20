@@ -1,0 +1,25 @@
+{
+  "command": "simulate",
+  "environment": {
+    "git": "d5c42f8",
+    "gpu": null,
+    "host": "llm-server",
+    "loadavg_1m": 9.25146484375,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "timestamp": "2026-11-20T22:32:04+00:00"
+  },
+  "seed": 0,
+  "shape": [
+    1024,
+    4096
+  ]
+}
