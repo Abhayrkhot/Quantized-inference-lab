@@ -23,7 +23,7 @@ def nll_from_hidden(
     hidden: torch.Tensor,
     ids: torch.Tensor,
     normed: bool = False,
-    chunk_rows: int = 512,
+    chunk_rows: int = 256,
 ) -> tuple[float, int]:
     """Summed next-token NLL (fp32 logits) and the number of predicted tokens."""
     if not normed:

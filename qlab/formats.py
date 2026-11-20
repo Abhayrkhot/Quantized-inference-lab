@@ -24,6 +24,28 @@ import torch
 
 Granularity = Literal["tensor", "channel", "group"]
 GRANULARITIES = ("tensor", "channel", "group")
+FORMATS = ("int", "nf4", "fp8")
+
+# The 16 NF4 levels (QLoRA, Dettmers et al. 2023): quantiles of N(0, 1) scaled to [-1, 1].
+NF4_LEVELS = (
+    -1.0,
+    -0.6961928009986877,
+    -0.5250730514526367,
+    -0.39491748809814453,
+    -0.28444138169288635,
+    -0.18477343022823334,
+    -0.09105003625154495,
+    0.0,
+    0.07958029955625534,
+    0.16093020141124725,
+    0.24611230194568634,
+    0.33791524171829224,
+    0.44070982933044434,
+    0.5626170039176941,
+    0.7229568362236023,
+    1.0,
+)
+FP8_MAX = 448.0  # largest finite float8_e4m3fn
 
 SCALE_BITS = 16  # scales are stored as fp16
 
@@ -36,8 +58,15 @@ class QuantSpec:
     granularity: Granularity = "group"
     group_size: int = 128
     symmetric: bool = False
+    fmt: str = "int"  # "int" | "nf4" (4-bit normal-float codebook) | "fp8" (E4M3)
 
     def __post_init__(self) -> None:
+        if self.fmt not in FORMATS:
+            raise ValueError(f"fmt must be one of {FORMATS}, got {self.fmt!r}")
+        if self.fmt == "nf4" and self.bits != 4:
+            raise ValueError("nf4 is a 4-bit format")
+        if self.fmt == "fp8" and self.bits != 8:
+            raise ValueError("fp8 is an 8-bit format")
         if not 2 <= self.bits <= 8:
             raise ValueError(f"bits must be in [2, 8], got {self.bits}")
         if self.granularity not in GRANULARITIES:
@@ -54,6 +83,8 @@ class QuantSpec:
     @property
     def label(self) -> str:
         gran = f"g{self.group_size}" if self.granularity == "group" else self.granularity
+        if self.fmt != "int":
+            return f"{self.fmt} {gran}"
         return f"int{self.bits} {gran} {'sym' if self.symmetric else 'asym'}"
 
     def n_groups(self, in_features: int) -> int:
@@ -74,7 +105,8 @@ class QuantSpec:
 
     def overhead_bits(self, shape: tuple[int, int]) -> int:
         """Bits spent on scales and zero-points (zeros are packed at ``bits`` each)."""
-        per_set = SCALE_BITS + (0 if self.symmetric else self.bits)
+        has_zero = self.fmt == "int" and not self.symmetric
+        per_set = SCALE_BITS + (self.bits if has_zero else 0)
         return self.n_param_sets(shape) * per_set
 
     def bits_per_weight(self, shape: tuple[int, int]) -> float:
@@ -162,8 +194,26 @@ def expand_params(p: torch.Tensor, spec: QuantSpec, shape: tuple[int, int]) -> t
     return p.repeat_interleave(spec.group_size, dim=1)
 
 
+def _fake_quant_codebook(w: torch.Tensor, spec: QuantSpec) -> torch.Tensor:
+    """NF4 / FP8: absmax-scaled per group (or channel/tensor), then nearest representable value."""
+    wg = _grouped(w.float(), spec)
+    absmax = wg.abs().amax(dim=-1, keepdim=True)
+    absmax = torch.where(absmax > 0, absmax, torch.ones_like(absmax))
+    if spec.fmt == "fp8":
+        scale = absmax / FP8_MAX
+        v = (wg / scale).clamp(-FP8_MAX, FP8_MAX).to(torch.float8_e4m3fn).float()
+        return (v * scale).reshape(w.shape).to(w.dtype)
+    levels = torch.tensor(NF4_LEVELS, device=w.device)
+    mids = (levels[1:] + levels[:-1]) / 2
+    idx = torch.bucketize((wg / absmax).contiguous(), mids)
+    return (levels[idx] * absmax).reshape(w.shape).to(w.dtype)
+
+
 def fake_quant(w: torch.Tensor, spec: QuantSpec, clip: float | torch.Tensor = 1.0) -> torch.Tensor:
     """Quantize then dequantize, returning a tensor with ``w``'s dtype and shape."""
+    if spec.fmt != "int":
+        _check_2d(w)
+        return _fake_quant_codebook(w, spec)
     scale, zero = compute_qparams(w, spec, clip)
     return dequantize(quantize(w, scale, zero, spec), scale, zero, spec, dtype=w.dtype)
 

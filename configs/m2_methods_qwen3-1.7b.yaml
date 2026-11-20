@@ -1,0 +1,16 @@
+# M2 on Qwen3-1.7B-Base through block offload (bf16 weights do not fit the 4 GB card with
+# activations). Exercises every calibrated method's memory and step logic at a second size.
+name: m2_methods_1.7b
+model: Qwen/Qwen3-1.7B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: true
+datasets: [wikitext2]
+runs:
+  - {method: baseline}
+  - sweep: {method: [rtn, gptq, awq], bits: [4], granularity: [g128], symmetric: [false]}
+  - {method: smoothquant, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: token, alpha: 0.5}
+  - {method: rtn, bits: 4, granularity: g64, fmt: nf4}
+  - {method: rtn, bits: 8, granularity: channel, fmt: fp8}
+  - {method: baseline, kv_bits: 4, kv_mode: kivi}

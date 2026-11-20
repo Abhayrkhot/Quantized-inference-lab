@@ -1,0 +1,13 @@
+# M4 laptop demo: quantize Qwen3-4B-Base on the 4 GB GPU through block offload (GPTQ, int4 g128
+# symmetric, the format vLLM serves with GPTQ-Marlin), then serve it on the same card. In bf16
+# its weights alone (~8 GB) are twice the card's memory.
+name: m4_qwen3-4b
+model: Qwen/Qwen3-4B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 2
+offload: true
+datasets: [wikitext2]
+runs:
+  - {method: baseline}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: true, save: qwen3-4b/gptq-w4g128-sym.pt}

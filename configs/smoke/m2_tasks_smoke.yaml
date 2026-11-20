@@ -1,0 +1,12 @@
+# Smoke test for the lm-eval path: 5 examples per task, CPU is fine.
+name: m2_tasks_smoke
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+batch_size: 2
+task_batch_size: 4
+task_limit: 5
+offload: false
+datasets: []
+tasks: [arc_easy, arc_challenge, hellaswag, piqa, winogrande]
+runs:
+  - {method: baseline}

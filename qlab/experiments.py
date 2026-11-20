@@ -21,22 +21,25 @@ import itertools
 import json
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
 from torch import nn
 
+from . import awq, gptq, smoothquant
 from .actquant import activation_quant
 from .data import DATASETS, c4_calib
 from .eval.ppl import perplexity
 from .formats import QuantSpec
-from .model import load_model, restore, size_report, snapshot
+from .kvquant import kv_bytes_per_token, kv_quant
+from .model import decoder, load_model, restore, size_report, snapshot
 from .results import read_rows, write_rows
 from .rtn import quantize_rtn
+from .sequential import capture, run_blocks
 
-_RUN_KEYS = ("method", "bits", "granularity", "symmetric", "act_bits", "act_granularity")
+_RUN_KEYS = ("method", "bits", "granularity", "symmetric", "fmt", "act_bits", "act_granularity")
 
 
 def parse_granularity(g: str) -> tuple[str, int]:
@@ -54,6 +57,7 @@ class Run:
     bits: int | None = None
     granularity: str | None = None
     symmetric: bool = False
+    fmt: str = "int"
     act_bits: int | None = None
     act_granularity: str = "token"
     params: dict = field(default_factory=dict, hash=False, compare=False)
@@ -68,7 +72,7 @@ class Run:
         if self.bits is None:
             return None
         gran, gs = parse_granularity(self.granularity or "channel")
-        return QuantSpec(self.bits, gran, gs, self.symmetric)
+        return QuantSpec(self.bits, gran, gs, self.symmetric, self.fmt)
 
     @property
     def weights_label(self) -> str:
@@ -78,6 +82,11 @@ class Run:
     @property
     def acts_label(self) -> str:
         return f"int{self.act_bits} per-{self.act_granularity}" if self.act_bits else "16-bit"
+
+    @property
+    def kv_label(self) -> str:
+        b = self.params.get("kv_bits")
+        return f"int{b} {self.params.get('kv_mode', 'token')}" if b else "16-bit"
 
     @property
     def key(self) -> str:
@@ -110,12 +119,16 @@ class Context:
     seqlen: int
     batch_size: int
     offload: bool
+    artifacts: dict = field(default_factory=dict)
     _calib: dict = field(default_factory=dict)
 
-    def calib(self, n: int = 128, seed: int = 0) -> torch.Tensor:
-        if (n, seed) not in self._calib:
-            self._calib[(n, seed)] = c4_calib(self.tokenizer, n=n, seqlen=self.seqlen, seed=seed)
-        return self._calib[(n, seed)]
+    def calib(self, run: Run, n: int = 128, seqlen: int | None = None) -> torch.Tensor:
+        """Calibration windows; a run can override ``calib_n`` / ``calib_seqlen``."""
+        n = int(run.params.get("calib_n", n))
+        seqlen = int(run.params.get("calib_seqlen", seqlen or self.seqlen))
+        if (n, seqlen) not in self._calib:
+            self._calib[(n, seqlen)] = c4_calib(self.tokenizer, n=n, seqlen=seqlen, seed=0)
+        return self._calib[(n, seqlen)]
 
 
 Method = Callable[[nn.Module, Run, Context], dict]
@@ -129,7 +142,102 @@ def _rtn(model, run, ctx):
     return quantize_rtn(model, run.spec(), ctx.device)
 
 
-METHODS: dict[str, Method] = {"baseline": _baseline, "rtn": _rtn}
+def _sequential(model, ctx, windows, before=None, after=None):
+    inputs = capture(model, windows, ctx.device, ctx.batch_size)
+    run_blocks(
+        model, inputs, ctx.device, before_block=before, after_block=after, offload=ctx.offload
+    )
+    if not ctx.offload:
+        model.to(ctx.device)
+
+
+def _gptq(model, run, ctx):
+    log: list = []
+    hook = gptq.make_block_hook(
+        run.spec(),
+        ctx.device,
+        ctx.artifacts,
+        blocksize=int(run.params.get("blocksize", 128)),
+        percdamp=float(run.params.get("damp", 0.01)),
+        act_order=bool(run.params.get("act_order", False)),
+        log=log,
+    )
+    _sequential(model, ctx, ctx.calib(run, n=128, seqlen=2048), before=hook)
+    return {"gptq_loss_sum": round(sum(v for _, v in log), 2)}
+
+
+def _awq(model, run, ctx):
+    log: list = []
+    hook = awq.make_block_hook(
+        run.spec(),
+        ctx.device,
+        n_grid=int(run.params.get("grid", 20)),
+        clip=bool(run.params.get("clip", True)),
+        log=log,
+        results=ctx.artifacts,
+    )
+    _sequential(model, ctx, ctx.calib(run, n=128, seqlen=512), after=hook)
+    alphas = [a for _, a in log]
+    return {"awq_alpha_mean": round(sum(alphas) / len(alphas), 3) if alphas else None}
+
+
+def _smoothquant(model, run, ctx):
+    hook = smoothquant.make_block_hook(run.spec(), ctx.device, float(run.params.get("alpha", 0.5)))
+    _sequential(model, ctx, ctx.calib(run, n=128, seqlen=512), after=hook)
+    return {}
+
+
+METHODS: dict[str, Method] = {
+    "baseline": _baseline,
+    "rtn": _rtn,
+    "gptq": _gptq,
+    "awq": _awq,
+    "smoothquant": _smoothquant,
+}
+
+
+def _tasks(
+    model: nn.Module, tok, tasks: list[str], batch_size: int, limit: int | None = None
+) -> dict[str, float]:
+    """Zero-shot accuracy with lm-eval on the in-memory (quantized) model."""
+    from lm_eval import simple_evaluate
+    from lm_eval.models.huggingface import HFLM
+
+    lm = HFLM(pretrained=model, tokenizer=tok, batch_size=batch_size)
+    res = simple_evaluate(model=lm, tasks=tasks, num_fewshot=0, bootstrap_iters=0, limit=limit)[
+        "results"
+    ]
+    out = {}
+    for t in tasks:
+        for metric in ("acc", "acc_norm"):
+            v = res.get(t, {}).get(f"{metric},none")
+            if v is not None:
+                out[f"{t}_{metric}"] = round(float(v), 4)
+    return out
+
+
+def _save(model: nn.Module, run: Run, ctx: Context, path: Path) -> None:
+    """Integer weights (for export) plus every non-quantized tensor (scaled norms included)."""
+    import os
+
+    if not path.is_absolute():
+        path = Path(os.environ.get("QIL_DATA", Path.home() / "qildata")) / "ckpt" / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dec = decoder(model)
+    prefix = next(n for n, m in model.named_modules() if m is dec)
+    quantized = {f"{prefix}.{k}.weight" for k in ctx.artifacts}
+    rest = {k: v.detach().cpu() for k, v in model.state_dict().items() if k not in quantized}
+    torch.save(
+        {
+            "run": run.key,
+            "spec": run.spec(),
+            "layers": ctx.artifacts,
+            "rest": rest,
+            "config": model.config.to_dict(),
+        },
+        path,
+    )
+    print(f"saved {path}", flush=True)
 
 
 def run_config(
@@ -155,6 +263,8 @@ def run_config(
     model, tok = load_model(cfg["model"], cfg.get("dtype", "bfloat16"), "cpu" if offload else dev)
     base = snapshot(model)
     evals = {name: DATASETS[name](tok, seqlen=seqlen) for name in cfg["datasets"]}
+    if cfg.get("eval_windows"):  # smoke tests only: score the first N windows
+        evals = {n: w[: int(cfg["eval_windows"])] for n, w in evals.items()}
     ctx = Context(dev, tok, seqlen, bs, offload)
     meta = {"config": cfg, "config_path": str(config_path)}
 
@@ -162,15 +272,33 @@ def run_config(
         restore(model, base)
         torch.cuda.empty_cache()
         t0 = time.perf_counter()
+        ctx.artifacts = {}
         info = METHODS[run.method](model, run, ctx)
         t_quant = time.perf_counter() - t0
-        acts = activation_quant(model, run.act_bits, run.act_granularity) if run.act_bits else None
+        if run.params.get("save"):
+            _save(model, run, ctx, Path(run.params["save"]))
+        kv_bits = run.params.get("kv_bits")
+        kv_mode = run.params.get("kv_mode", "token")
         t0 = time.perf_counter()
-        with acts or nullcontext():
+        with ExitStack() as stack:
+            if run.act_bits:
+                stack.enter_context(activation_quant(model, run.act_bits, run.act_granularity))
+            if kv_bits:
+                stack.enter_context(kv_quant(model, int(kv_bits), kv_mode))
             ppl = {
                 f"{n}_ppl": round(perplexity(model, w, dev, bs, offload), 4)
                 for n, w in evals.items()
             }
+            if cfg.get("tasks"):
+                ppl.update(
+                    _tasks(
+                        model,
+                        tok,
+                        cfg["tasks"],
+                        int(cfg.get("task_batch_size", 16)),
+                        cfg.get("task_limit"),
+                    )
+                )
         t_eval = time.perf_counter() - t0
         size = size_report(model, run.spec())
         row = {
@@ -179,6 +307,8 @@ def run_config(
             "method": run.method,
             "weights": run.weights_label,
             "acts": run.acts_label,
+            "kv": run.kv_label,
+            "kv_bytes_per_token": round(kv_bytes_per_token(model.config, kv_bits, kv_mode), 1),
             "bits": run.bits or 16,
             "granularity": run.granularity or "",
             "symmetric": run.symmetric if run.bits else "",

@@ -1,0 +1,6 @@
+# Reference image: llm-compressor, used only to cross-check qlab's GPTQ / AWQ / SmoothQuant.
+# llm-compressor 0.15.0 pins transformers 5.21.0 and compressed-tensors 0.20.1, which would
+# change vLLM's environment, so it lives in its own image. Its results are scored by qlab's own
+# perplexity code, and the bf16 baseline is re-measured here to show the evaluation matches.
+FROM qil-dev:latest
+RUN pip install --no-cache-dir llmcompressor==0.15.0

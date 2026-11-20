@@ -46,6 +46,14 @@ def _cmd_outliers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_export(args: argparse.Namespace) -> int:
+    from .export import export
+
+    out = export(args.ckpt, args.out_dir, args.tokenizer, args.format)
+    print(f"wrote {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="qlab", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -74,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--detail-modules", nargs="*", default=["self_attn.q_proj", "mlp.down_proj"])
     o.add_argument("--out-prefix", required=True)
     o.set_defaults(func=_cmd_outliers)
+
+    e = sub.add_parser("export", help="write a saved run as a vLLM-loadable GPTQ/AWQ checkpoint")
+    e.add_argument("ckpt", help="file written by a run with `save:`")
+    e.add_argument("out_dir")
+    e.add_argument("--tokenizer", required=True)
+    e.add_argument("--format", default="auto", choices=["auto", "gptq", "awq"])
+    e.set_defaults(func=_cmd_export)
     return p
 
 

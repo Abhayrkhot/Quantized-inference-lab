@@ -56,3 +56,42 @@ def test_rtn_changes_weights_and_ppl_but_not_much_at_8_bits():
     assert perplexity(model, windows, device="cpu") == pytest.approx(before, rel=1e-2)
     # embeddings / lm_head (tied) stay untouched
     assert torch.equal(model.lm_head.weight, tiny_qwen3().lm_head.weight)
+
+
+@pytest.mark.parametrize("method", ["gptq", "awq", "smoothquant"])
+def test_calibrated_methods_run_end_to_end_on_tiny_model(method, monkeypatch):
+    from qlab import experiments
+
+    model = tiny_qwen3()
+    windows = torch.randint(0, 512, (4, 64), generator=torch.Generator().manual_seed(3))
+    calib = torch.randint(0, 512, (8, 64), generator=torch.Generator().manual_seed(4))
+    before = perplexity(model, windows, device="cpu")
+    bits = 8 if method == "smoothquant" else 4
+    run = experiments.Run.from_dict(
+        {
+            "method": method,
+            "bits": bits,
+            "granularity": "channel" if bits == 8 else "g16",
+            "symmetric": bits == 8,
+        }
+    )
+    ctx = experiments.Context(torch.device("cpu"), None, 64, 2, offload=False)
+    monkeypatch.setattr(ctx, "calib", lambda run, n=128, seqlen=None: calib)
+    info = experiments.METHODS[method](model, run, ctx)
+    after = perplexity(model, windows, device="cpu")
+    assert math.isfinite(after) and after < before * 1.5
+    if method in ("gptq", "awq"):
+        assert len(ctx.artifacts) == 3 * 7  # every linear of every block
+    assert isinstance(info, dict)
+
+
+def test_kv_quant_context_changes_logits_and_restores():
+    from qlab.kvquant import kv_quant
+
+    model = tiny_qwen3()
+    windows = torch.randint(0, 512, (2, 64), generator=torch.Generator().manual_seed(5))
+    base = perplexity(model, windows, device="cpu")
+    with kv_quant(model, 2, "token"):
+        q = perplexity(model, windows, device="cpu")
+    assert q != base
+    assert perplexity(model, windows, device="cpu") == pytest.approx(base, rel=1e-6)

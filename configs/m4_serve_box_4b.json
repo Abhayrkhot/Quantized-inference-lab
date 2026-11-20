@@ -1,0 +1,4 @@
+[
+  {"label": "Qwen3-4B bf16", "model": "Qwen/Qwen3-4B-Base"},
+  {"label": "Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin)", "model": "/data/export/qwen3-4b-gptq-w4g128-sym"}
+]

@@ -1,0 +1,42 @@
+# M2: calibrated methods, other 4/8-bit formats and KV-cache quantization on Qwen3-0.6B-Base.
+# Calibration: C4 train, 128 windows (2048 tokens for GPTQ, 512 for AWQ and SmoothQuant).
+name: m2_methods
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: false
+datasets: [wikitext2, c4]
+runs:
+  - {method: baseline}
+  # 4- and 3-bit weight-only, groups of 128, asymmetric: RTN vs GPTQ vs AWQ
+  - sweep: {method: [rtn, gptq, awq], bits: [4, 3], granularity: [g128], symmetric: [false]}
+  # GPTQ variants
+  - {method: gptq, bits: 4, granularity: g128, symmetric: true, save: qwen3-0.6b/gptq-w4g128-sym.pt}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: false, act_order: true}
+  - {method: gptq, bits: 4, granularity: channel, symmetric: false}
+  - {method: rtn, bits: 4, granularity: channel, symmetric: false}
+  # AWQ without the clipping search (what llm-compressor's AWQ does), and a saved checkpoint
+  - {method: awq, bits: 4, granularity: g128, symmetric: false, clip: false}
+  - {method: awq, bits: 4, granularity: g128, symmetric: false, save: qwen3-0.6b/awq-w4g128-asym.pt}
+  # Other formats
+  - {method: rtn, bits: 4, granularity: g64, fmt: nf4}
+  - {method: rtn, bits: 8, granularity: channel, fmt: fp8}
+  - {method: rtn, bits: 8, granularity: tensor, fmt: fp8}
+  # W8A8: plain RTN vs SmoothQuant at two migration strengths
+  - {method: rtn, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: token}
+  - {method: rtn, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: tensor}
+  - sweep:
+      method: [smoothquant]
+      bits: [8]
+      granularity: [channel]
+      symmetric: [true]
+      act_bits: [8]
+      act_granularity: [token, tensor]
+      alpha: [0.5, 0.75]
+  # KV cache (weights 16-bit), then combined with 4-bit GPTQ weights
+  - {method: baseline, kv_bits: 8, kv_mode: token}
+  - {method: baseline, kv_bits: 4, kv_mode: token}
+  - {method: baseline, kv_bits: 4, kv_mode: kivi}
+  - {method: baseline, kv_bits: 2, kv_mode: kivi}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: false, kv_bits: 8, kv_mode: token}

@@ -1,0 +1,20 @@
+# Smoke test for the calibrated methods on the real model: tiny calibration, 16 eval windows.
+name: m2_smoke
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 2
+offload: true
+eval_windows: 16
+datasets: [wikitext2]
+runs:
+  - {method: baseline}
+  - {method: rtn, bits: 4, granularity: g128, symmetric: false}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: false, calib_n: 8}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: true, calib_n: 8, act_order: true}
+  - {method: awq, bits: 4, granularity: g128, symmetric: false, calib_n: 16}
+  - {method: smoothquant, bits: 8, granularity: channel, symmetric: true, act_bits: 8, act_granularity: token, calib_n: 16}
+  - {method: rtn, bits: 4, granularity: g64, fmt: nf4}
+  - {method: rtn, bits: 8, granularity: channel, fmt: fp8}
+  - {method: baseline, kv_bits: 4, kv_mode: kivi}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: true, calib_n: 8, save: smoke/gptq-sym.pt}

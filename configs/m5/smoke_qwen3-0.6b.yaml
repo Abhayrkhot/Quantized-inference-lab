@@ -1,0 +1,12 @@
+# M5 step 1: rerun a box configuration on Explorer. Perplexity must match
+# results/box/m2_methods.csv within 0.5% before any long job is submitted.
+name: m5_smoke
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: false
+datasets: [wikitext2, c4]
+runs:
+  - {method: baseline}
+  - {method: gptq, bits: 4, granularity: g128, symmetric: false}

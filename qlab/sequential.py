@@ -101,12 +101,14 @@ def run_blocks(
     inputs: BlockInputs,
     device: torch.device | str,
     before_block: BlockHook | None = None,
+    after_block: BlockHook | None = None,
     offload: bool = True,
 ) -> BlockInputs:
     """Push ``inputs`` through every decoder block in order and return the final hidden states.
 
     ``before_block(i, block, inputs)`` runs with block ``i`` on ``device`` before its outputs
-    are computed; GPTQ and AWQ use it to quantize the block from its calibration inputs.
+    are computed (GPTQ: later blocks see quantized outputs). ``after_block`` runs after the
+    outputs are computed (AWQ, SmoothQuant: later blocks see the float outputs).
     With ``offload`` each block goes back to the CPU after use.
     """
     layers = decoder(model).layers
@@ -120,6 +122,8 @@ def run_blocks(
             y = block(h.to(device), **_to(kw, device))
             y = y[0] if isinstance(y, tuple) else y
             nxt.hidden.append(y.to("cpu"))
+        if after_block is not None:  # e.g. AWQ: next block sees the unquantized outputs
+            after_block(i, block, cur)
         if offload:
             block.to("cpu")
         cur = nxt

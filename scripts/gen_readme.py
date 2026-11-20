@@ -91,8 +91,523 @@ def t_m0_simulate(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
+def _ppl(x: str) -> str:
+    if x in ("", None):
+        return "–"
+    v = float(x)
+    return f"{v:.1e}" if v >= 1000 else f"{v:.2f}"
+
+
+def t_m1_rtn(root: Path) -> str:
+    rel = "results/box/m1_rtn.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    base = next(r for r in rows if r["method"] == "baseline" and r["acts"] == "16-bit")
+    rtn = {
+        (r["granularity"], r["bits"], r["symmetric"]): r
+        for r in rows
+        if r["method"] == "rtn" and r["acts"] == "16-bit"
+    }
+    cols = [(b, sym) for b in ("8", "4", "3") for sym in ("True", "False")]
+    head = ["Scales"] + [f"int{b} {'sym' if s == 'True' else 'asym'}" for b, s in cols]
+    body = []
+    for g, name in [
+        ("tensor", "per tensor"),
+        ("channel", "per channel"),
+        ("g128", "groups of 128"),
+        ("g64", "groups of 64"),
+        ("g32", "groups of 32"),
+    ]:
+        cells = []
+        for b, sym in cols:
+            r = rtn.get((g, b, sym))
+            cells.append(f"{_ppl(r['wikitext2_ppl'])} / {_ppl(r['c4_ppl'])}" if r else "–")
+        body.append([name, *cells])
+    note = (
+        f"BF16 baseline: {_ppl(base['wikitext2_ppl'])} / {_ppl(base['c4_ppl'])}. "
+        "Each cell is WikiText-2 / C4 perplexity."
+    )
+    return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel)
+
+
+def t_m1_w8a8(root: Path) -> str:
+    rel = "results/box/m1_rtn.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    sel = [r for r in rows if r["acts"] != "16-bit" or (r["method"] == "baseline")]
+    head = ["Weights", "Activations", "WikiText-2", "C4"]
+    body = [[r["weights"], r["acts"], _ppl(r["wikitext2_ppl"]), _ppl(r["c4_ppl"])] for r in sel]
+    body += [
+        [r["weights"], r["acts"], _ppl(r["wikitext2_ppl"]), _ppl(r["c4_ppl"])]
+        for r in rows
+        if r["method"] == "rtn" and r["weights"] == "int8 channel sym" and r["acts"] == "16-bit"
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m1_outliers(root: Path) -> str:
+    rel = "results/box/m1_outliers_summary.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    feeds = {
+        "self_attn.q_proj": "q/k/v input (after input RMSNorm)",
+        "self_attn.o_proj": "o_proj input (attention output)",
+        "mlp.gate_proj": "gate/up input (after post-attention RMSNorm)",
+        "mlp.down_proj": "down_proj input (SwiGLU output)",
+    }
+    head = [
+        "Linear input",
+        "Activation max/median (median over blocks)",
+        "worst block",
+        "Weight max/median (median over blocks)",
+        "worst block",
+    ]
+    body = []
+    for mod, label in feeds.items():
+        sel = [r for r in rows if r["module"] == mod]
+        if not sel:
+            continue
+        a = sorted(float(r["act_max_over_median"]) for r in sel)
+        w = sorted(float(r["weight_max_over_median"]) for r in sel)
+        body.append(
+            [
+                label,
+                f"{a[len(a) // 2]:.0f}×",
+                f"{a[-1]:.0f}×",
+                f"{w[len(w) // 2]:.0f}×",
+                f"{w[-1]:.0f}×",
+            ]
+        )
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m1_offload(root: Path) -> str:
+    rel = "results/box/m1_offload.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    head = ["Model", "Weights", "Bits/weight", "Model MB", "WikiText-2", "Eval s"]
+    body = [
+        [
+            r["model"].split("/")[-1],
+            r["weights"],
+            f"{float(r['bits_per_weight']):.2f}",
+            f"{float(r['model_mb']):.0f}",
+            _ppl(r["wikitext2_ppl"]),
+            r["eval_s"],
+        ]
+        for r in rows
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def _label(r: dict[str, str]) -> str:
+    """Short human label for a qlab run row."""
+    params = r.get("params") or ""
+    m = {
+        "baseline": "BF16",
+        "rtn": "RTN",
+        "gptq": "GPTQ",
+        "awq": "AWQ",
+        "smoothquant": "SmoothQuant",
+    }[r["method"]]
+    extra = []
+    if '"act_order": true' in params:
+        extra.append("act-order")
+    if '"clip": false' in params:
+        extra.append("no clip search")
+    if '"alpha": ' in params:
+        extra.append("α=" + params.split('"alpha": ')[1].split(",")[0].split("}")[0])
+    return m + (f" ({', '.join(extra)})" if extra else "")
+
+
+def _find(rows, method, weights, acts="16-bit", kv="16-bit", contains=None):
+    for r in rows:
+        if (
+            r["method"] == method
+            and r["weights"] == weights
+            and r["acts"] == acts
+            and r.get("kv", "16-bit") == kv
+            and (contains is None or contains in r["run"])
+        ):
+            return r
+    return None
+
+
+def t_m2_methods(root: Path) -> str:
+    rel = "results/box/m2_methods.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    sel = [r for r in rows if r["acts"] == "16-bit" and r.get("kv", "16-bit") == "16-bit"]
+    head = ["Method", "Weights", "Bits/weight", "Model MB", "WikiText-2", "C4", "Quantize s"]
+    order = {"baseline": 0, "rtn": 1, "gptq": 2, "awq": 3}
+    sel.sort(
+        key=lambda r: (
+            -int(r["bits"]) if r["method"] != "baseline" else -99,
+            r["weights"],
+            order.get(r["method"], 9),
+        )
+    )
+    body = [
+        [
+            _label(r),
+            r["weights"],
+            f"{float(r['bits_per_weight']):.2f}",
+            f"{float(r['model_mb']):.0f}",
+            _ppl(r["wikitext2_ppl"]),
+            _ppl(r["c4_ppl"]),
+            r["quant_s"],
+        ]
+        for r in sel
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m2_w8a8(root: Path) -> str:
+    rel = "results/box/m2_methods.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    sel = [r for r in rows if r["acts"] != "16-bit"]
+    head = ["Method", "Weights", "Activations", "WikiText-2", "C4"]
+    body = [
+        [_label(r), r["weights"], r["acts"], _ppl(r["wikitext2_ppl"]), _ppl(r["c4_ppl"])]
+        for r in sel
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m2_kv(root: Path) -> str:
+    rel = "results/box/m2_methods.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    base = _find(rows, "baseline", "16-bit")
+    sel = ([base] if base else []) + [r for r in rows if r.get("kv", "16-bit") != "16-bit"]
+    head = ["Weights", "KV cache", "KV bytes/token", "KV at 32k tokens", "WikiText-2", "C4"]
+    body = []
+    for r in sel:
+        b = float(r["kv_bytes_per_token"])
+        body.append(
+            [
+                r["weights"] if r["method"] == "baseline" else f"{_label(r)} {r['weights']}",
+                r.get("kv", "16-bit"),
+                f"{b:,.0f}",
+                f"{b * 32768 / 2**20:,.0f} MB",
+                _ppl(r["wikitext2_ppl"]),
+                _ppl(r["c4_ppl"]),
+            ]
+        )
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+REFERENCE_PAIRS = [
+    ("baseline", "BF16 (evaluation parity)", ("baseline", "16-bit", "16-bit", None)),
+    (
+        "gptq_w4g128_asym",
+        "GPTQ int4 g128 asym",
+        ("gptq", "int4 g128 asym", "16-bit", "|16-bit|16-bit|"),
+    ),
+    ("gptq_w4g128_sym", "GPTQ int4 g128 sym", ("gptq", "int4 g128 sym", "16-bit", None)),
+    (
+        "awq_w4g128_asym",
+        "AWQ int4 g128 asym, no clip search",
+        ("awq", "int4 g128 asym", "16-bit", "clip=False"),
+    ),
+    (
+        "smoothquant_w8a8",
+        "SmoothQuant W8A8 α=0.5",
+        ("smoothquant", "int8 channel sym", "int8 per-token", "alpha=0.5"),
+    ),
+]
+
+
+def t_m2_reference(root: Path) -> str:
+    rel_ref, rel_ours = "results/box/m2_reference.csv", "results/box/m2_methods.csv"
+    ref, ours = _rows(root, rel_ref), _rows(root, rel_ours)
+    if ref is None or ours is None:
+        return "_Not run yet._"
+    head = [
+        "Configuration",
+        "qlab WikiText-2",
+        "llm-compressor",
+        "Δ",
+        "qlab C4",
+        "llm-compressor",
+        "Δ",
+    ]
+    body = []
+    for recipe, label, (method, weights, acts, contains) in REFERENCE_PAIRS:
+        r = next((x for x in ref if x["recipe"] == recipe), None)
+        o = _find(ours, method, weights, acts, contains=contains)
+        if contains == "|16-bit|16-bit|" and o is None:
+            o = _find(ours, method, weights, acts)
+        if r is None or o is None:
+            continue
+        cells = [label]
+        for d in ("wikitext2", "c4"):
+            a, b = float(o[f"{d}_ppl"]), float(r[f"{d}_ppl"])
+            cells += [f"{a:.3f}", f"{b:.3f}", f"{100 * (a - b) / b:+.2f}%"]
+        body.append(cells)
+    note = (
+        "Same model, calibration windows and evaluation code; the llm-compressor runs use its "
+        "own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same "
+        "evaluation run in both images."
+    )
+    return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel_ref)
+
+
+TASKS = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande"]
+
+
+def t_m2_tasks(root: Path) -> str:
+    rel = "results/box/m2_tasks.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    metric = {
+        "arc_easy": "acc",
+        "arc_challenge": "acc_norm",
+        "hellaswag": "acc_norm",
+        "piqa": "acc_norm",
+        "winogrande": "acc",
+    }
+    head = ["Method", "Weights", "Activations"] + [f"{t} ({metric[t]})" for t in TASKS] + ["Mean"]
+    body = []
+    for r in rows:
+        vals = [float(r[f"{t}_{metric[t]}"]) for t in TASKS if r.get(f"{t}_{metric[t]}")]
+        body.append(
+            [_label(r), r["weights"], r["acts"]]
+            + [
+                f"{100 * float(r[f'{t}_{metric[t]}']):.1f}" if r.get(f"{t}_{metric[t]}") else "–"
+                for t in TASKS
+            ]
+            + [f"{100 * sum(vals) / len(vals):.1f}" if vals else "–"]
+        )
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m2_17b(root: Path) -> str:
+    rel = "results/box/m2_methods_1.7b.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    head = [
+        "Method",
+        "Weights",
+        "Activations",
+        "KV cache",
+        "Bits/weight",
+        "Model MB",
+        "WikiText-2",
+        "Quantize s",
+    ]
+    body = [
+        [
+            _label(r),
+            r["weights"],
+            r["acts"],
+            r.get("kv", "16-bit"),
+            f"{float(r['bits_per_weight']):.2f}",
+            f"{float(r['model_mb']):.0f}",
+            _ppl(r["wikitext2_ppl"]),
+            r["quant_s"],
+        ]
+        for r in rows
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+# (K, N) -> how many times that linear shape occurs in one decoder block
+BLOCK_SHAPES = {
+    "qwen3-0.6b": {
+        (1024, 2048): 1,
+        (1024, 1024): 2,
+        (2048, 1024): 1,
+        (1024, 3072): 2,
+        (3072, 1024): 1,
+    },
+    "qwen3-1.7b": {(2048, 2048): 2, (2048, 1024): 2, (2048, 6144): 2, (6144, 2048): 1},
+    "qwen3-8b": {(4096, 4096): 2, (4096, 1024): 2, (4096, 12288): 2, (12288, 4096): 1},
+}
+KERNELS = ["bf16 cuBLAS", "qlab triton", "qlab triton sym", "vLLM marlin", "bnb nf4"]
+
+
+def _kernel_table(root: Path, rel: str) -> str:
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    t = {
+        (r["model"], int(r["K"]), int(r["N"]), int(r["M"]), r["kernel"]): float(r["us"])
+        for r in rows
+    }
+    ms = sorted({int(r["M"]) for r in rows})
+    head = (
+        ["Model", "M (tokens)"]
+        + [f"{k} µs" for k in KERNELS]
+        + ["triton vs bf16", "triton sym vs marlin"]
+    )
+    body = []
+    for model, shapes in BLOCK_SHAPES.items():
+        for m in ms:
+            per = {}
+            for k in KERNELS:
+                vals = [t.get((model, kk, nn, m, k)) for (kk, nn) in shapes]
+                if all(v is not None for v in vals):
+                    per[k] = sum(v * c for v, c in zip(vals, shapes.values(), strict=True))
+            if "bf16 cuBLAS" not in per:
+                continue
+            ratio = per["bf16 cuBLAS"] / per["qlab triton"] if "qlab triton" in per else None
+            vs_m = (
+                per["vLLM marlin"] / per["qlab triton sym"]
+                if "vLLM marlin" in per and "qlab triton sym" in per
+                else None
+            )
+            body.append(
+                [model, str(m)]
+                + [f"{per[k]:.0f}" if k in per else "–" for k in KERNELS]
+                + [f"{ratio:.2f}×" if ratio else "–", f"{vs_m:.2f}×" if vs_m else "–"]
+            )
+    note = (
+        "Time for all linear layers of one decoder block (q, k, v, o, gate, up, down), summed "
+        'from per-shape medians. "triton sym vs marlin" above 1× means qlab\'s kernel is '
+        "faster than Marlin on the same symmetric weights."
+    )
+    return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel)
+
+
+def t_m3_kernels(root: Path) -> str:
+    return _kernel_table(root, "results/box/m3_kernels.csv")
+
+
+def t_m3_bandwidth(root: Path) -> str:
+    rel = "results/box/m3_kernels.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    sel = [r for r in rows if r["M"] == "1"]
+    head = ["Model", "K × N"] + [f"{k} % of copy BW" for k in KERNELS]
+    by = {(r["model"], r["K"], r["N"], r["kernel"]): r["pct_copy_bw"] for r in sel}
+    body = []
+    for model, shapes in BLOCK_SHAPES.items():
+        for kk, nn in shapes:
+            if (model, str(kk), str(nn), "bf16 cuBLAS") in by:
+                body.append(
+                    [model, f"{kk} × {nn}"]
+                    + [by.get((model, str(kk), str(nn), k), "–") for k in KERNELS]
+                )
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m3_e2e(root: Path) -> str:
+    rel = "results/box/m3_e2e.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    head = [
+        "Model",
+        "Linear weights",
+        "Weights MB",
+        "Decode tokens/s",
+        "ms/token",
+        "Prefill ms",
+        "Peak MB",
+        "Speedup",
+    ]
+    body = [
+        [
+            r["model"].split("/")[-1],
+            r["weights"],
+            f"{float(r['weights_mb']):.0f}",
+            r["decode_tokens_per_s"],
+            r["decode_ms_per_token"],
+            r["prefill_ms"],
+            f"{float(r['peak_mem_mb']):.0f}",
+            (r.get("speedup_vs_16bit") or "1.00") + "×",
+        ]
+        for r in rows
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m4_parity(root: Path) -> str:
+    rel = "results/box/m4_vllm_ppl.csv"
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    head = ["Checkpoint", "vLLM WikiText-2", "qlab WikiText-2 (same run)", "Δ"]
+    body = [
+        [
+            r["label"],
+            _ppl(r["vllm_wikitext2_ppl"]),
+            _ppl(r.get("qlab_wikitext2_ppl", "")),
+            f"{float(r['diff_pct']):+.2f}%" if r.get("diff_pct") else "–",
+        ]
+        for r in rows
+    ]
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def _serve_table(root: Path, rel: str) -> str:
+    rows = _rows(root, rel)
+    if rows is None:
+        return "_Not run yet._"
+    head = [
+        "Checkpoint",
+        "Weights GiB",
+        "KV cache tokens",
+        "Concurrency",
+        "TTFT p50 ms",
+        "TPOT p50 ms",
+        "Output tokens/s",
+        "Errors",
+    ]
+    body = []
+    for r in rows:
+        if r.get("error"):
+            body.append([r["label"], "–", "–", "–", "–", "–", "–", r["error"][:60]])
+            continue
+        ttft = r.get("ttft_p50_s")
+        body.append(
+            [
+                r["label"],
+                r.get("weights_gib", "–"),
+                f"{int(float(r['kv_cache_tokens'])):,}" if r.get("kv_cache_tokens") else "–",
+                r["concurrency"],
+                f"{1000 * float(ttft):.0f}" if ttft else "–",
+                r.get("tpot_p50_ms", "–"),
+                r["tokens_per_s"],
+                r["errors"],
+            ]
+        )
+    return _table(head, body) + "\n\n" + _source(root, rel)
+
+
+def t_m4_serve(root: Path) -> str:
+    return _serve_table(root, "results/box/m4_serve.csv")
+
+
 TABLES: dict[str, Callable[[Path], str]] = {
+    "m3_kernels": t_m3_kernels,
+    "m3_bandwidth": t_m3_bandwidth,
+    "m3_e2e": t_m3_e2e,
+    "m4_parity": t_m4_parity,
+    "m4_serve": t_m4_serve,
+    "m2_methods": t_m2_methods,
+    "m2_w8a8": t_m2_w8a8,
+    "m2_kv": t_m2_kv,
+    "m2_reference": t_m2_reference,
+    "m2_tasks": t_m2_tasks,
+    "m2_17b": t_m2_17b,
     "m0_simulate": t_m0_simulate,
+    "m1_rtn": t_m1_rtn,
+    "m1_w8a8": t_m1_w8a8,
+    "m1_outliers": t_m1_outliers,
+    "m1_offload": t_m1_offload,
 }
 
 
