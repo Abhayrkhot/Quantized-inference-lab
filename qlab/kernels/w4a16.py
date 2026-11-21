@@ -174,6 +174,7 @@ if HAVE_GLUON:
         BLOCK_K: gl.constexpr,
         SPLIT_K: gl.constexpr,
     ):
+        # configs are chosen by timing CUDA-graph replays (_graph_bench)
         IS_BF16: gl.constexpr = a_ptr.dtype.element_ty == gl.bfloat16
         BKP: gl.constexpr = BLOCK_K // 8
         mma: gl.constexpr = gl.NVMMADistributedLayout(
@@ -250,9 +251,22 @@ if HAVE_GLUON:
                 gl.store(cnt_ptr + tile, 0)
 
 
-def _quick_bench(kernel_call, quantiles):
-    """Autotuning timer: Triton's do_bench (L2 flushed before each call) with short runs."""
-    return triton.testing.do_bench(kernel_call, warmup=5, rep=25, quantiles=quantiles)
+def _graph_bench(fn, quantiles=None, rep=25):
+    """Time ``fn`` the way decoding runs it: replayed back to back in a CUDA graph.
+
+    Eager timing with an L2 flush before every call (Triton's default) lets the SM clock
+    recover between calls; on a power-capped GPU that favours compute-heavy configs that
+    lose at sustained clocks. Falls back to eager timing where ``fn`` cannot be captured.
+    """
+    try:
+        return triton.testing.do_bench_cudagraph(fn, rep=rep, quantiles=quantiles)
+    except Exception:  # noqa: BLE001 - not capturable here: time it eagerly
+        torch.cuda.synchronize()
+        return triton.testing.do_bench(fn, warmup=5, rep=rep, quantiles=quantiles)
+
+
+def _graph_bench_long(fn, quantiles=None):
+    return _graph_bench(fn, quantiles, rep=60)
 
 
 def _prefer_wide_k(configs):
@@ -297,7 +311,7 @@ if HAVE_GLUON:
         configs=_small_configs(),
         key=["M_BUCKET", "N", "K", "GROUP"],
         prune_configs_by={"early_config_prune": _small_prune},
-        do_bench=_quick_bench,
+        do_bench=_graph_bench,
         cache_results=True,
     )(_small_kernel)
 
@@ -330,6 +344,7 @@ def _gemv_prune(configs, named_args, **kwargs):
     key=["N", "K", "GROUP"],
     prune_configs_by={"early_config_prune": _gemv_prune},
     reset_to_zero=["c_ptr"],
+    do_bench=_graph_bench,
     cache_results=True,
 )
 @triton.jit
@@ -354,6 +369,7 @@ def _gemv_kernel(
     Accumulates ``x * (q - z)`` element-wise over a group (the fp32 magic number ``2^23``
     turns a code into a float with one OR) and applies the scale once per group.
     """
+    # configs are chosen by timing CUDA-graph replays (_graph_bench)
     pid_n = tl.program_id(0)
     pid_k = tl.program_id(1)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -436,6 +452,7 @@ def _m_bucket(m: int) -> int:
     key=["M_BUCKET", "N", "K", "GROUP"],
     prune_configs_by={"early_config_prune": _mm_prune},
     reset_to_zero=["c_ptr"],
+    do_bench=_graph_bench_long,
     cache_results=True,
 )
 @triton.jit
@@ -460,6 +477,7 @@ def _mm_kernel(
     BLOCK_K: tl.constexpr,
     SPLIT_K: tl.constexpr,
 ):
+    # configs are chosen by timing CUDA-graph replays (_graph_bench)
     IS_BF16: tl.constexpr = a_ptr.dtype.element_ty == tl.bfloat16
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -698,7 +716,7 @@ def _launch_dequant_cublas(a, qweight, scales, qzeros, group, m, n, k):
 
 
 def _prefill(a, qweight, scales, qzeros, group, m, n, k):
-    """M > 16: the fused kernel, or dequantize + cuBLAS where that measured faster here."""
+    """M > 64: the fused kernel, or dequantize + cuBLAS where that measured faster here."""
     key = (a.device.index, a.dtype, _m_bucket(m), n, k, group)
     choice = _PREFILL_CHOICE.get(key)
     args = (a, qweight, scales, qzeros, group, m, n, k)
@@ -706,14 +724,10 @@ def _prefill(a, qweight, scales, qzeros, group, m, n, k):
         if m <= 64 or torch.cuda.is_current_stream_capturing():
             choice = "fused"  # no timing during graph capture; small M never favours cuBLAS
         else:
-            from triton.testing import do_bench
-
             _launch_mm(*args)  # autotune first, outside the timing
-            t_fused = do_bench(lambda: _launch_mm(*args), warmup=5, rep=20, return_mode="median")
-            t_deq = do_bench(
-                lambda: _launch_dequant_cublas(*args), warmup=5, rep=20, return_mode="median"
-            )
-            choice = "dequant+cublas" if t_deq < 0.95 * t_fused else "fused"
+            t_fused = _graph_bench_long(lambda: _launch_mm(*args))
+            t_deq = _graph_bench_long(lambda: _launch_dequant_cublas(*args))
+            choice = "dequant+cublas" if t_deq < 0.97 * t_fused else "fused"
         _PREFILL_CHOICE[key] = choice
     if choice == "fused":
         return _launch_mm(*args)
