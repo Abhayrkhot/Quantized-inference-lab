@@ -1,3 +1,3 @@
 run,model,method,weights,acts,kv,kv_bytes_per_token,bits,granularity,symmetric,bits_per_weight,linear_mb,model_mb,wikitext2_ppl,weight_rel_err,quant_s,eval_s,params,git
 baseline|16-bit|16-bit|,Qwen/Qwen3-4B-Base,baseline,16-bit,16-bit,16-bit,147456.0,16,,,16.0,6930.0,7672.25,7.9007,,0.0,263.2,,076f767
-gptq|int4 g128 sym|16-bit|save=qwen3-4b/gptq-w4g128-sym.pt,Qwen/Qwen3-4B-Base,gptq,int4 g128 sym,16-bit,16-bit,147456.0,4,g128,True,4.125,1786.64,2528.89,8.3445,,2026.3,264.8,"{""gptq_loss_sum"": 7937.63, ""save"": ""qwen3-4b/gptq-w4g128-sym.pt""}",076f767
+gptq|int4 g128 sym|16-bit|save=qwen3-4b/gptq-w4g128-sym.pt,Qwen/Qwen3-4B-Base,gptq,int4 g128 sym,16-bit,16-bit,147456.0,4,g128,True,4.125,1786.64,2528.89,8.2831,,2022.1,265.0,"{""gptq_loss_sum"": 6922.41, ""save"": ""qwen3-4b/gptq-w4g128-sym.pt""}",9785ddb

@@ -69,11 +69,11 @@
   "environment": {
     "cuda": "13.0",
     "driver": "580.178.04",
-    "git": "dff0328",
+    "git": "9785ddb",
     "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_mem_gb": 3.68,
     "host": "llm-server",
-    "loadavg_1m": 3.201171875,
+    "loadavg_1m": 1.771484375,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -85,6 +85,6 @@
     },
     "python": "3.12.3",
     "sm": "8.6",
-    "timestamp": "2026-11-21T00:22:16+00:00"
+    "timestamp": "2026-11-21T19:06:34+00:00"
   }
 }

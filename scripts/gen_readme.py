@@ -321,6 +321,17 @@ REFERENCE_PAIRS = [
 ]
 
 
+def _reference_pairs(ref: list[dict], ours: list[dict]):
+    """(recipe, label, qlab row, llm-compressor row) for each configuration run in both."""
+    for recipe, label, (method, weights, acts, contains) in REFERENCE_PAIRS:
+        r = next((x for x in ref if x["recipe"] == recipe), None)
+        o = _find(ours, method, weights, acts, contains=contains)
+        if contains == "|16-bit|16-bit|" and o is None:
+            o = _find(ours, method, weights, acts)
+        if r is not None and o is not None:
+            yield recipe, label, o, r
+
+
 def t_m2_reference(
     root: Path,
     rel_ref: str = "results/box/m2_reference.csv",
@@ -339,13 +350,7 @@ def t_m2_reference(
         "Δ",
     ]
     body = []
-    for recipe, label, (method, weights, acts, contains) in REFERENCE_PAIRS:
-        r = next((x for x in ref if x["recipe"] == recipe), None)
-        o = _find(ours, method, weights, acts, contains=contains)
-        if contains == "|16-bit|16-bit|" and o is None:
-            o = _find(ours, method, weights, acts)
-        if r is None or o is None:
-            continue
+    for _recipe, label, o, r in _reference_pairs(ref, ours):
         cells = [label]
         for d in ("wikitext2", "c4"):
             a, b = float(o[f"{d}_ppl"]), float(r[f"{d}_ppl"])
@@ -354,10 +359,8 @@ def t_m2_reference(
     note = (
         "Same model, calibration windows and evaluation code; the llm-compressor runs use its "
         "own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same "
-        "evaluation run in both images. The symmetric gap is a convention difference: "
-        "compressed-tensors scales symmetric weights by absmax / 7.5 and uses codes -8..7, while "
-        "qlab uses absmax / 7 and codes -7..7, a 7% coarser step. Where the conventions agree "
-        "(asymmetric), the implementations match."
+        "evaluation run in both images. Both scale symmetric weights and activations by "
+        "absmax / (2^(b-1) - 0.5): absmax / 7.5 for 4-bit weights, absmax / 127.5 at 8 bits."
     )
     return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel_ref)
 
@@ -637,18 +640,17 @@ def t_headline(root: Path) -> str:
         _rows(root, "results/box/m2_methods.csv"),
     )
     if ref and ours:
-        r = next((x for x in ref if x["recipe"] == "gptq_w4g128_asym"), None)
-        o = next((x for x in ours if x["run"] == "gptq|int4 g128 asym|16-bit|"), None)
-        if r and o:
-            d = (
-                100
-                * (float(o["wikitext2_ppl"]) - float(r["wikitext2_ppl"]))
-                / float(r["wikitext2_ppl"])
-            )
+        diffs = [
+            abs(float(o[f"{d}_ppl"]) - float(r[f"{d}_ppl"])) / float(r[f"{d}_ppl"]) * 100
+            for recipe, _label, o, r in _reference_pairs(ref, ours)
+            if recipe != "baseline"
+            for d in ("wikitext2", "c4")
+        ]
+        if diffs:
             rows.append(
                 [
-                    "GPTQ vs llm-compressor (same calibration and evaluation)",
-                    f"{d:+.2f}% WikiText-2 perplexity",
+                    "GPTQ (sym and asym), AWQ, SmoothQuant vs llm-compressor",
+                    f"within {max(diffs):.2f}% perplexity (WikiText-2 and C4)",
                     "`results/box/m2_reference.csv`",
                 ]
             )

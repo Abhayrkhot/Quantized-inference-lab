@@ -52,11 +52,11 @@
   "environment": {
     "cuda": "13.0",
     "driver": "570.86.15",
-    "git": "fa91529",
+    "git": "9785ddb",
     "gpu": "NVIDIA H200",
     "gpu_mem_gb": 139.81,
-    "host": "d4055",
-    "loadavg_1m": 12.89208984375,
+    "host": "d4052",
+    "loadavg_1m": 10.16064453125,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -68,6 +68,6 @@
     },
     "python": "3.12.3",
     "sm": "9.0",
-    "timestamp": "2026-11-21T08:08:08+00:00"
+    "timestamp": "2026-11-21T17:16:47+00:00"
   }
 }

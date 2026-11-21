@@ -22,8 +22,8 @@ files disagree.
 |---|---|---|
 | Qwen3-8B: WikiText-2 perplexity, int4 g128 | BF16 7.00 · RTN 8.17 · GPTQ 7.32 · AWQ 7.27 | `results/explorer/m5_methods_8b.csv` |
 | Qwen3-0.6B: WikiText-2 perplexity, int4 g128 | BF16 12.67 · RTN 16.16 · GPTQ 14.78 · AWQ 14.24 | `results/box/m2_methods.csv` |
-| GPTQ vs llm-compressor (same calibration and evaluation) | +0.02% WikiText-2 perplexity | `results/box/m2_reference.csv` |
-| Exported checkpoints in vLLM vs qlab's evaluation | within 0.07% perplexity | `results/box/m4_vllm_ppl.csv` |
+| GPTQ (sym and asym), AWQ, SmoothQuant vs llm-compressor | within 0.76% perplexity (WikiText-2 and C4) | `results/box/m2_reference.csv` |
+| Exported checkpoints in vLLM vs qlab's evaluation | within 0.02% perplexity | `results/box/m4_vllm_ppl.csv` |
 | Triton W4A16, batch-1 decode, Qwen3-8B block (RTX 3050 Ti, kernel at git 8b566ce) | 3.63× vs 16-bit cuBLAS · 1.02× Marlin's speed | `results/box/m3_kernels.csv` |
 | Triton W4A16, batched decode (M = 2-16), Qwen3-8B block (RTX 3050 Ti, kernel at git 8b566ce) | 2.82-4.17× vs 16-bit cuBLAS · 0.85-1.03× Marlin's speed | `results/box/m3_kernels.csv` |
 | Triton W4A16, batch-1 decode, Qwen3-8B block (H200, kernel at git 0d71e1d) | 2.23× vs 16-bit cuBLAS · 1.51× Marlin's speed | `results/explorer/m5_kernels_h200.csv` |
@@ -52,7 +52,9 @@ in the same software environment.
 
 * **Granularity:** one scale per tensor, per output channel, or per group of `G` consecutive
   input columns in each row.
-* **Symmetric:** the zero point is fixed at `2^(b-1)` and `scale = absmax / (2^(b-1) - 1)`.
+* **Symmetric:** the zero point is fixed at `2^(b-1)` and `scale = absmax / (2^(b-1) - 0.5)`
+  (`absmax / 7.5` at 4 bits), the convention of the GPTQ reference code and
+  compressed-tensors. A test checks the codes against the GPTQ reference quantizer.
 * **Asymmetric:** `[min(w,0), max(w,0)]` maps onto all `2^b` codes with an integer zero
   point.
 * **Also:** NF4 (the QLoRA codebook) and FP8 E4M3.
@@ -92,7 +94,7 @@ the few large columns. Small groups confine the damage to the groups that contai
 | int3 channel asym | 3.005 | 9.00e-02 | 10.5 | 1.12e+00 | 6.5 |
 | int3 g128 asym | 3.148 | 4.65e-02 | 13.3 | 4.64e-01 | 10.3 |
 
-<sub>Source: `results/box/m0_simulate.csv` · CPU · torch 2.14.0 · git d5c42f8 · 2026-11-20</sub>
+<sub>Source: `results/box/m0_simulate.csv` · CPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m0_simulate -->
 
 ## M1: round-to-nearest on a real model
@@ -109,15 +111,15 @@ WikiText-2 / C4 perplexity for round-to-nearest (RTN) weights:
 <!-- qlab:begin m1_rtn -->
 | Scales | int8 sym | int8 asym | int4 sym | int4 asym | int3 sym | int3 asym |
 |---|---|---|---|---|---|---|
-| per tensor | 13.20 / 20.78 | 13.12 / 20.68 | 1.3e+08 / 1.2e+08 | 8.6e+06 / 4.6e+06 | 4.3e+05 / 4.6e+05 | 8.6e+07 / 1.0e+08 |
-| per channel | 12.72 / 19.97 | 12.71 / 19.96 | 30.48 / 45.33 | 24.30 / 36.95 | 2.0e+05 / 1.5e+05 | 1.7e+03 / 2.0e+03 |
-| groups of 128 | 12.70 / 19.95 | 12.70 / 19.93 | 18.55 / 28.85 | 16.16 / 25.11 | 548.05 / 758.87 | 78.31 / 117.55 |
-| groups of 64 | 12.70 / 19.94 | 12.69 / 19.93 | 16.58 / 25.62 | 15.18 / 23.62 | 156.52 / 252.68 | 37.78 / 59.14 |
-| groups of 32 | 12.69 / 19.93 | 12.68 / 19.92 | 15.33 / 24.12 | 14.44 / 22.50 | 62.41 / 93.29 | 26.15 / 40.02 |
+| per tensor | 13.21 / 20.80 | 13.12 / 20.68 | 2.6e+07 / 2.1e+07 | 8.6e+06 / 4.6e+06 | 3.9e+07 / 9.0e+07 | 8.6e+07 / 1.0e+08 |
+| per channel | 12.72 / 19.97 | 12.71 / 19.96 | 25.86 / 39.17 | 24.30 / 36.95 | 1.3e+04 / 8.3e+03 | 1.7e+03 / 2.0e+03 |
+| groups of 128 | 12.70 / 19.95 | 12.70 / 19.93 | 16.99 / 26.51 | 16.16 / 25.11 | 178.00 / 226.80 | 78.31 / 117.55 |
+| groups of 64 | 12.70 / 19.95 | 12.69 / 19.93 | 16.03 / 24.81 | 15.18 / 23.62 | 73.32 / 111.08 | 37.78 / 59.14 |
+| groups of 32 | 12.69 / 19.93 | 12.68 / 19.92 | 15.08 / 23.71 | 14.44 / 22.50 | 39.01 / 59.79 | 26.15 / 40.02 |
 
 BF16 baseline: 12.67 / 19.89. Each cell is WikiText-2 / C4 perplexity.
 
-<sub>Source: `results/box/m1_rtn.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git dff0328 · 2026-11-21</sub>
+<sub>Source: `results/box/m1_rtn.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m1_rtn -->
 
 ![RTN perplexity vs bits per weight](results/box/m1_rtn_ppl.png)
@@ -159,13 +161,13 @@ calibrated methods in M2 exist. The effect on W8A8:
 | Weights | Activations | WikiText-2 | C4 |
 |---|---|---|---|
 | 16-bit | 16-bit | 12.67 | 19.89 |
-| int8 channel sym | int8 per-tensor | 21.49 | 32.97 |
+| int8 channel sym | int8 per-tensor | 21.35 | 32.95 |
 | int8 channel sym | int8 per-token | 13.01 | 20.40 |
-| 16-bit | int8 per-tensor | 21.26 | 32.77 |
+| 16-bit | int8 per-tensor | 21.12 | 32.54 |
 | 16-bit | int8 per-token | 12.99 | 20.35 |
 | int8 channel sym | 16-bit | 12.72 | 19.97 |
 
-<sub>Source: `results/box/m1_rtn.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git dff0328 · 2026-11-21</sub>
+<sub>Source: `results/box/m1_rtn.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m1_w8a8 -->
 
 ### Block offload
@@ -239,13 +241,13 @@ What the table shows:
 | AWQ | int4 g128 asym | 4.16 | 515 | 14.24 | 22.14 | 271.2 |
 | AWQ (no clip search) | int4 g128 asym | 4.16 | 515 | 14.25 | 22.14 | 259.9 |
 | AWQ (saved for export) | int4 g128 asym | 4.16 | 515 | 14.24 | 22.14 | 263.8 |
-| GPTQ (saved for export) | int4 g128 sym | 4.12 | 513 | 15.73 | 24.22 | 341.5 |
+| GPTQ (saved for export) | int4 g128 sym | 4.12 | 513 | 15.25 | 23.75 | 429.9 |
 | RTN | nf4 g64 | 4.25 | 520 | 14.80 | 23.30 | 0.4 |
 | RTN | int3 g128 asym | 3.15 | 462 | 78.31 | 117.55 | 0.4 |
 | GPTQ | int3 g128 asym | 3.15 | 462 | 26.52 | 40.27 | 341.4 |
 | AWQ | int3 g128 asym | 3.15 | 462 | 23.13 | 33.87 | 266.1 |
 
-<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m2_methods -->
 
 ### W8A8
@@ -259,13 +261,13 @@ fold the scale into for free.
 | Method | Weights | Activations | WikiText-2 | C4 |
 |---|---|---|---|---|
 | RTN | int8 channel sym | int8 per-token | 13.01 | 20.40 |
-| RTN | int8 channel sym | int8 per-tensor | 21.49 | 32.97 |
-| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 12.88 | 20.22 |
-| SmoothQuant (α=0.75) | int8 channel sym | int8 per-token | 12.86 | 20.15 |
+| RTN | int8 channel sym | int8 per-tensor | 21.35 | 32.95 |
+| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 12.89 | 20.21 |
+| SmoothQuant (α=0.75) | int8 channel sym | int8 per-token | 12.86 | 20.16 |
 | SmoothQuant (α=0.5) | int8 channel sym | int8 per-tensor | 17.50 | 26.85 |
-| SmoothQuant (α=0.75) | int8 channel sym | int8 per-tensor | 17.52 | 26.80 |
+| SmoothQuant (α=0.75) | int8 channel sym | int8 per-tensor | 17.56 | 26.81 |
 
-<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m2_w8a8 -->
 
 ### KV cache
@@ -289,7 +291,7 @@ memory. At 2 bits even KIVI degrades.
 | 16-bit | int2 kivi | 16,128 | 504 MB | 46.32 | 70.87 |
 | GPTQ int4 g128 asym | int8 token | 59,136 | 1,848 MB | 14.96 | 23.29 |
 
-<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m2_kv -->
 
 ### Cross-check against llm-compressor
@@ -299,11 +301,11 @@ memory. At 2 bits even KIVI degrades.
 |---|---|---|---|---|---|---|
 | BF16 (evaluation parity) | 12.669 | 12.669 | +0.00% | 19.889 | 19.889 | +0.00% |
 | GPTQ int4 g128 asym | 14.775 | 14.773 | +0.02% | 23.042 | 22.962 | +0.35% |
-| GPTQ int4 g128 sym | 15.726 | 15.369 | +2.32% | 24.224 | 23.887 | +1.41% |
+| GPTQ int4 g128 sym | 15.253 | 15.369 | -0.76% | 23.748 | 23.887 | -0.58% |
 | AWQ int4 g128 asym, no clip search | 14.251 | 14.245 | +0.05% | 22.143 | 22.165 | -0.10% |
-| SmoothQuant W8A8 α=0.5 | 12.884 | 12.890 | -0.05% | 20.216 | 20.236 | -0.10% |
+| SmoothQuant W8A8 α=0.5 | 12.886 | 12.890 | -0.04% | 20.213 | 20.236 | -0.12% |
 
-Same model, calibration windows and evaluation code; the llm-compressor runs use its own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same evaluation run in both images. The symmetric gap is a convention difference: compressed-tensors scales symmetric weights by absmax / 7.5 and uses codes -8..7, while qlab uses absmax / 7 and codes -7..7, a 7% coarser step. Where the conventions agree (asymmetric), the implementations match.
+Same model, calibration windows and evaluation code; the llm-compressor runs use its own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same evaluation run in both images. Both scale symmetric weights and activations by absmax / (2^(b-1) - 0.5): absmax / 7.5 for 4-bit weights, absmax / 127.5 at 8 bits.
 
 <sub>Source: `results/box/m2_reference.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 12a2b40 · 2026-11-21</sub>
 <!-- qlab:end m2_reference -->
@@ -471,10 +473,10 @@ from prompt log-probabilities, must match qlab's evaluation of the same run.
 | Checkpoint | vLLM WikiText-2 | qlab WikiText-2 (same run) | Δ |
 |---|---|---|---|
 | bf16 | 12.67 | 12.67 | +0.01% |
-| qlab GPTQ int4 g128 sym | 15.74 | 15.73 | +0.07% |
 | qlab AWQ int4 g128 asym | 14.24 | 14.24 | -0.01% |
+| qlab GPTQ int4 g128 sym | 15.25 | 15.25 | -0.02% |
 
-<sub>Source: `results/box/m4_vllm_ppl.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+<sub>Source: `results/box/m4_vllm_ppl.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m4_parity -->
 
 The exports load through vLLM's own loader and kernels (GPTQ-Marlin, AWQ-Marlin), and
@@ -492,9 +494,6 @@ which shows at high concurrency.
 | Qwen3-0.6B bf16 | 1.12 | 7,680 | 1 | 16 | 8.57 | 115.8 | 0 |
 | Qwen3-0.6B bf16 | 1.12 | 7,680 | 16 | 43 | 10.39 | 1497.0 | 0 |
 | Qwen3-0.6B bf16 | 1.12 | 7,680 | 64 | 111 | 18.88 | 3119.4 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 1 | 12 | 4.83 | 204.5 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 16 | 34 | 6.71 | 2308.9 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 64 | 90 | 15.6 | 3935.7 | 0 |
 | Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 1 | 13 | 4.83 | 204.2 | 0 |
 | Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 16 | 37 | 6.68 | 2307.7 | 0 |
 | Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 64 | 91 | 15.73 | 3915.6 | 0 |
@@ -504,11 +503,14 @@ which shows at high concurrency.
 | Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 1 | 18 | 8.59 | 115.4 | 0 |
 | Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 16 | 38 | 10.09 | 1550.5 | 0 |
 | Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 64 | 91 | 16.54 | 3382.8 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 1 | 12 | 4.84 | 203.8 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 16 | 29 | 6.39 | 2431.6 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 64 | 73 | 14.4 | 4299.7 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 1 | 12 | 4.85 | 203.5 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 16 | 33 | 6.7 | 2305.3 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 64 | 88 | 15.91 | 3887.5 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 1 | 12 | 4.85 | 203.4 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 16 | 26 | 6.44 | 2410.8 | 0 |
+| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 64 | 68 | 14.46 | 4286.3 | 0 |
 
-<sub>Source: `results/box/m4_serve.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+<sub>Source: `results/box/m4_serve.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m4_serve -->
 
 ### A 4B model on a 4 GB laptop GPU
@@ -527,10 +529,14 @@ serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load. It need
 | Method | Weights | Activations | KV cache | Bits/weight | Model MB | WikiText-2 | Quantize s |
 |---|---|---|---|---|---|---|---|
 | BF16 | 16-bit | 16-bit | 16-bit | 16.00 | 7672 | 7.90 | 0.0 |
-| GPTQ (saved for export) | int4 g128 sym | 16-bit | 16-bit | 4.12 | 2529 | 8.34 | 2026.3 |
+| GPTQ (saved for export) | int4 g128 sym | 16-bit | 16-bit | 4.12 | 2529 | 8.28 | 2022.1 |
 
-<sub>Source: `results/box/m4_qwen3-4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+<sub>Source: `results/box/m4_qwen3-4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m4_qwen3_4b -->
+
+The serving rows were measured on the export made before symmetric weights switched to
+`absmax / 7.5` (the git revision in their source line). The checkpoint's format and size did
+not change, and GPTQ-Marlin's speed does not depend on the weight values.
 
 <!-- qlab:begin m4_serve_4b -->
 | Checkpoint | Weights GiB | KV cache tokens | Concurrency | TTFT p50 ms | TPOT p50 ms | Output tokens/s | Errors |
@@ -580,13 +586,13 @@ The pattern from the 0.6B model holds, and the calibrated methods matter more:
 | GPTQ | int4 g128 asym | 4.16 | 5816 | 7.32 | 12.28 | 382.4 |
 | AWQ | int4 g128 asym | 4.16 | 5816 | 7.27 | 12.38 | 142.7 |
 | AWQ (saved for export) | int4 g128 asym | 4.16 | 5816 | 7.27 | 12.38 | 132.4 |
-| GPTQ (saved for export) | int4 g128 sym | 4.12 | 5790 | 7.45 | 12.41 | 376.6 |
+| GPTQ (saved for export) | int4 g128 sym | 4.12 | 5790 | 7.38 | 12.34 | 400.0 |
 | RTN | nf4 g64 | 4.25 | 5894 | 7.42 | 12.66 | 0.4 |
 | RTN | int3 g128 asym | 3.15 | 4981 | 11.92 | 19.58 | 0.4 |
 | GPTQ | int3 g128 asym | 3.15 | 4981 | 8.55 | 13.58 | 379.6 |
 | AWQ | int3 g128 asym | 3.15 | 4981 | 8.44 | 13.79 | 132.6 |
 
-<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_methods -->
 
 W8A8 and the KV cache on 8B follow the 0.6B results: SmoothQuant helps per-token W8A8. An
@@ -595,10 +601,10 @@ INT8 KV cache is free, and KIVI-style INT4 costs little at a quarter of the memo
 <!-- qlab:begin m5_w8a8 -->
 | Method | Weights | Activations | WikiText-2 | C4 |
 |---|---|---|---|---|
-| RTN | int8 channel sym | int8 per-token | 7.44 | 12.81 |
-| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 7.37 | 12.67 |
+| RTN | int8 channel sym | int8 per-token | 7.45 | 12.81 |
+| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 7.38 | 12.66 |
 
-<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_w8a8 -->
 
 <!-- qlab:begin m5_kv -->
@@ -608,7 +614,7 @@ INT8 KV cache is free, and KIVI-style INT4 costs little at a quarter of the memo
 | 16-bit | int8 token | 76,032 | 2,376 MB | 7.00 | 11.92 |
 | 16-bit | int4 kivi | 39,168 | 1,224 MB | 7.05 | 11.98 |
 
-<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_methods_8b.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_kv -->
 
 ### Zero-shot accuracy on Qwen3-8B
@@ -625,9 +631,9 @@ separates the methods more clearly than accuracy does.
 | RTN | int4 g128 asym | 16-bit | 80.8 | 56.9 | 76.4 | 79.2 | 71.8 | 73.0 |
 | GPTQ | int4 g128 asym | 16-bit | 83.0 | 58.2 | 78.0 | 79.8 | 72.5 | 74.3 |
 | AWQ | int4 g128 asym | 16-bit | 81.9 | 57.2 | 77.7 | 80.1 | 73.5 | 74.1 |
-| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 81.4 | 55.4 | 77.9 | 79.6 | 71.7 | 73.2 |
+| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 80.9 | 56.5 | 77.7 | 78.9 | 71.4 | 73.1 |
 
-<sub>Source: `results/explorer/m5_tasks_8b.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_tasks_8b.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_tasks -->
 
 ### Kernels on the H200
@@ -709,10 +715,10 @@ matches qlab's evaluation as closely as on the laptop:
 | Checkpoint | vLLM WikiText-2 | qlab WikiText-2 (same run) | Δ |
 |---|---|---|---|
 | bf16 | 7.00 | 7.00 | -0.00% |
-| qlab GPTQ int4 g128 sym | 7.45 | 7.45 | +0.00% |
 | qlab AWQ int4 g128 asym | 7.27 | 7.27 | -0.01% |
+| qlab GPTQ int4 g128 sym | 7.38 | 7.38 | -0.02% |
 
-<sub>Source: `results/explorer/m5_vllm_ppl_8b.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_vllm_ppl_8b.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_parity -->
 
 On an H200 the trade-offs differ from the 4 GB laptop:
@@ -735,9 +741,6 @@ is.
 | Qwen3-8B bf16 | 15.27 | 793,088 | 1 | 10 | 5.28 | 187.8 | 0 |
 | Qwen3-8B bf16 | 15.27 | 793,088 | 16 | 19 | 5.44 | 2877.5 | 0 |
 | Qwen3-8B bf16 | 15.27 | 793,088 | 64 | 29 | 6.1 | 10008.0 | 0 |
-| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 862,720 | 1 | 10 | 4.36 | 226.9 | 0 |
-| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 862,720 | 16 | 21 | 4.51 | 3437.1 | 0 |
-| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 862,720 | 64 | 30 | 6.24 | 9767.9 | 0 |
 | Qwen3-8B qlab AWQ int4 (AWQ-Marlin) | 5.78 | 861,696 | 1 | 10 | 4.3 | 229.1 | 0 |
 | Qwen3-8B qlab AWQ int4 (AWQ-Marlin) | 5.78 | 861,696 | 16 | 19 | 4.48 | 3476.1 | 0 |
 | Qwen3-8B qlab AWQ int4 (AWQ-Marlin) | 5.78 | 861,696 | 64 | 30 | 6.29 | 9742.0 | 0 |
@@ -747,19 +750,18 @@ is.
 | Qwen3-8B bf16 + fp8 KV | 15.27 | 1,586,176 | 1 | 11 | 5.34 | 185.6 | 0 |
 | Qwen3-8B bf16 + fp8 KV | 15.27 | 1,586,176 | 16 | 22 | 5.57 | 2814.1 | 0 |
 | Qwen3-8B bf16 + fp8 KV | 15.27 | 1,586,176 | 64 | 31 | 6.15 | 9912.5 | 0 |
-| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,725,440 | 1 | 11 | 4.51 | 219.3 | 0 |
-| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,725,440 | 16 | 20 | 4.61 | 3380.3 | 0 |
-| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,725,440 | 64 | 30 | 6.38 | 9646.9 | 0 |
+| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 864,256 | 1 | 11 | 4.37 | 225.8 | 0 |
+| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 864,256 | 16 | 20 | 4.5 | 3476.6 | 0 |
+| Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin) | 5.71 | 864,256 | 64 | 33 | 6.15 | 9919.6 | 0 |
+| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,728,512 | 1 | 11 | 4.37 | 223.4 | 0 |
+| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,728,512 | 16 | 20 | 4.44 | 3495.0 | 0 |
+| Qwen3-8B qlab GPTQ int4 + fp8 KV | 5.71 | 1,728,512 | 64 | 32 | 6.23 | 9787.1 | 0 |
 
-<sub>Source: `results/explorer/m5_serve_8b_h200.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_serve_8b_h200.csv` · NVIDIA H200 · torch 2.14.0 · git 9785ddb · 2026-11-21</sub>
 <!-- qlab:end m5_serve -->
 
 ## Limitations and open items
 
-* **Symmetric convention.** qlab's symmetric INT4 uses `absmax / 7` and codes −7..7.
-  llm-compressor and the GPTQ reference use `absmax / 7.5` and −8..7, a finer step that is
-  worth about 2% perplexity on Qwen3-0.6B. Asymmetric results, where conventions agree, match
-  llm-compressor.
 * **Triton kernel.**
   - On the laptop card it matches Marlin for M = 1 to 8 and trails it from M = 16 up
     (0.73-0.89× on the 8B block). On the H200 it beats Marlin at M ≤ 8 and at M = 1024,

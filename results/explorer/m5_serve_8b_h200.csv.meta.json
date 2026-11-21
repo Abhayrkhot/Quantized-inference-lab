@@ -16,11 +16,11 @@
   "environment": {
     "cuda": "13.0",
     "driver": "570.86.15",
-    "git": "fa91529",
+    "git": "9785ddb",
     "gpu": "NVIDIA H200",
     "gpu_mem_gb": 139.81,
-    "host": "d4055",
-    "loadavg_1m": 13.07568359375,
+    "host": "d4052",
+    "loadavg_1m": 12.1103515625,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -32,7 +32,7 @@
     },
     "python": "3.12.3",
     "sm": "9.0",
-    "timestamp": "2026-11-21T08:43:59+00:00"
+    "timestamp": "2026-11-21T17:27:42+00:00"
   },
   "script": "bench/serve_bench.py"
 }
