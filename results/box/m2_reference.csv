@@ -1,3 +1,6 @@
 implementation,recipe,model,weights,acts,wikitext2_ppl,c4_ppl,quant_s
 qlab eval (reference image),baseline,Qwen/Qwen3-0.6B-Base,16-bit,16-bit,12.669,19.8889,0.0
 llm-compressor 0.15.0,gptq_w4g128_asym,Qwen/Qwen3-0.6B-Base,int4 g128 asym,16-bit,14.7728,22.9625,188.3
+llm-compressor 0.15.0,gptq_w4g128_sym,Qwen/Qwen3-0.6B-Base,int4 g128 sym,16-bit,15.3691,23.8865,196.5
+llm-compressor 0.15.0,awq_w4g128_asym,Qwen/Qwen3-0.6B-Base,int4 g128 asym,16-bit,14.2446,22.1654,241.1
+llm-compressor 0.15.0,smoothquant_w8a8,Qwen/Qwen3-0.6B-Base,int8 channel sym,int8 per-token,12.8903,20.2364,26.3

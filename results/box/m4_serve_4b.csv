@@ -1,0 +1,3 @@
+label,model,error
+Qwen3-4B bf16,Qwen/Qwen3-4B-Base,does not fit: CUDA out of memory while starting vLLM
+Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin),/data/export/qwen3-4b-gptq-w4g128-sym,vllm exited with 1

@@ -1,0 +1,4 @@
+label,model_dir,vllm_wikitext2_ppl,seconds,qlab_run,qlab_wikitext2_ppl,diff_pct
+bf16,Qwen/Qwen3-0.6B-Base,12.6696,45.2,baseline|16-bit|16-bit|,12.669,0.005
+qlab GPTQ int4 g128 sym,/data/export/qwen3-0.6b-gptq-w4g128-sym,15.737,43.7,gptq|int4 g128 sym|16-bit|save=qwen3-0.6b/gptq-w4g128-sym.pt,15.7264,0.067
+qlab AWQ int4 g128 asym,/data/export/qwen3-0.6b-awq-w4g128-asym,14.2362,43.7,awq|int4 g128 asym|16-bit|save=qwen3-0.6b/awq-w4g128-asym.pt,14.237,-0.006

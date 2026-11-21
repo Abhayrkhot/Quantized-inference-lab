@@ -1,0 +1,47 @@
+{
+  "config": {
+    "batch_size": 2,
+    "datasets": [
+      "wikitext2"
+    ],
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-4B-Base",
+    "name": "m4_qwen3-4b",
+    "offload": true,
+    "runs": [
+      {
+        "method": "baseline"
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "gptq",
+        "save": "qwen3-4b/gptq-w4g128-sym.pt",
+        "symmetric": true
+      }
+    ],
+    "seqlen": 2048
+  },
+  "config_path": "configs/m4_qwen3-4b.yaml",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "580.178.04",
+    "git": "076f767",
+    "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_mem_gb": 3.68,
+    "host": "llm-server",
+    "loadavg_1m": 1.82470703125,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "8.6",
+    "timestamp": "2026-11-21T05:41:53+00:00"
+  }
+}
