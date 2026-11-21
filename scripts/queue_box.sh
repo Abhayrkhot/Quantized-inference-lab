@@ -18,8 +18,8 @@ wait_quiet() {
 # runs cannot change the code under it, and every result carries a clean git revision.
 # Results are copied back to the working copy after each stage.
 REPO=$(pwd)
-RUN=${QIL_RUN_DIR:-$HOME/qil-run}
 SHA=$(git rev-parse HEAD)
+RUN=${QIL_RUN_DIR:-$HOME/qil-run/${SHA:0:7}}
 [ -d "$RUN/.git" ] || git clone -q "$REPO" "$RUN"
 git -C "$RUN" fetch -q "$REPO" && git -C "$RUN" checkout -q --detach "$SHA"
 mkdir -p "$RUN/results" && rsync -a "$REPO/results/" "$RUN/results/"
@@ -31,7 +31,10 @@ wait_gpu_free() {  # another qlab container (e.g. a stage of an earlier queue) s
     sleep 30
   done
 }
+LOCK=$LOGS/gpu.lock  # one stage at a time on the GPU, across queues
 for stage in "$@"; do
+  exec 9>"$LOCK"
+  flock 9
   wait_gpu_free
   echo "== $stage $(date -Is) load $(cut -d' ' -f1 /proc/loadavg)"
   case $stage in
@@ -48,4 +51,5 @@ for stage in "$@"; do
   rc=$?
   rsync -a "$RUN/results/" "$REPO/results/"
   echo "== $stage exit $rc $(date -Is)"
+  flock -u 9
 done

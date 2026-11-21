@@ -1,0 +1,11 @@
+# Smoke test: AWQ with the full calibration set (128 x 512), whole model on the 4 GB GPU.
+name: m2_awq_full
+model: Qwen/Qwen3-0.6B-Base
+dtype: bfloat16
+seqlen: 2048
+batch_size: 4
+offload: false
+eval_windows: 16
+datasets: [wikitext2]
+runs:
+  - {method: awq, bits: 4, granularity: g128, symmetric: false}

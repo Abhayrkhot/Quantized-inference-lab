@@ -9,7 +9,9 @@ For each (K, N) linear shape of a model and each batch size M, times ``y = x @ W
 * ``vLLM marlin``: ``apply_gptq_marlin_linear`` (uint4b8, g128) from the same image;
 * ``bnb nf4``: ``bitsandbytes.matmul_4bit`` (NF4, blocks of 64, fp32 absmax).
 
-Timing is ``triton.testing.do_bench`` (median over 100 ms, L2 cleared between runs).
+Timing replays each call in a CUDA graph (``triton.testing.do_bench_cudagraph``, median), as
+decoding does, so the Python launch cost of each library does not count. A kernel that
+cannot be captured is timed eagerly instead, and the ``timing`` column says which.
 Effective bandwidth is the bytes a kernel must move (weights, scales, zeros, x, y) divided
 by its time, also shown as a fraction of this GPU's measured device-to-device copy bandwidth.
 Every kernel's output is checked against a float32 reference before it is timed.
@@ -54,7 +56,7 @@ def _check(name, y, ref):
 
 
 def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str]) -> list[dict]:
-    from triton.testing import do_bench
+    from triton.testing import do_bench, do_bench_cudagraph
 
     torch.manual_seed(0)
     w = torch.randn(n, k, device="cuda") * 0.02
@@ -104,7 +106,14 @@ def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str
         io = (m * k + m * n) * 2
         for name, (fn, ref_w, wbytes) in kernels.items():
             err = _check(name, fn(x), x.float() @ ref_w.t())
-            t = do_bench(lambda fn=fn, x=x: fn(x), warmup=25, rep=100, return_mode="median")
+            torch.cuda.synchronize()
+            try:
+                t = do_bench_cudagraph(lambda fn=fn, x=x: fn(x), rep=100, return_mode="median")
+                mode = "cudagraph"
+            except Exception:  # noqa: BLE001 - not capturable: time it eagerly
+                torch.cuda.synchronize()
+                t = do_bench(lambda fn=fn, x=x: fn(x), warmup=25, rep=100, return_mode="median")
+                mode = "eager"
             bw = (wbytes + io) / (t * 1e-3)
             rows.append(
                 {
@@ -117,6 +126,7 @@ def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str
                     "eff_gbps": round(bw / 1e9, 1),
                     "pct_copy_bw": round(100 * bw / peak, 1),
                     "rel_err": round(err, 5),
+                    "timing": mode,
                 }
             )
     return rows

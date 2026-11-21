@@ -41,9 +41,11 @@ def _generate(model, ids, new):
 
 
 def measure(model, ids, new: int, reps: int) -> dict:
-    for _ in range(2):  # compile + CUDA-graph capture for both prefill and decode shapes
+    for _ in range(2):  # compile, autotune and CUDA-graph capture for prefill and decode shapes
         _generate(model, ids, new)
         _generate(model, ids, 1)
+    torch.cuda.empty_cache()  # drop autotuning scratch buffers before measuring peak memory
+    torch.cuda.reset_peak_memory_stats()
     decode, prefill = [], []
     for _ in range(reps):
         _, t1 = _generate(model, ids, 1)
@@ -80,7 +82,6 @@ def main() -> int:
             n = swap_in_quant_linears(model, QuantSpec(4, "group", 128, False))
             print(f"swapped {n} linears", flush=True)
         torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
         weights_mb = sum(b.numel() * b.element_size() for b in model.buffers()) / 2**20
         weights_mb += sum(p.numel() * p.element_size() for p in model.parameters()) / 2**20
         g = torch.Generator().manual_seed(0)
