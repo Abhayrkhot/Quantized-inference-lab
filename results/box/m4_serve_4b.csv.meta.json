@@ -6,7 +6,7 @@
     ],
     "duration": 60,
     "gpu_util": 0.95,
-    "max_model_len": 2048,
+    "max_model_len": 1024,
     "max_tokens": 128,
     "models": "configs/m4_serve_box_4b.json",
     "out": "results/box/m4_serve_4b.csv",
@@ -15,11 +15,11 @@
   "environment": {
     "cuda": "13.0",
     "driver": "580.178.04",
-    "git": "4ac5452-dirty",
+    "git": "ee62189-dirty",
     "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_mem_gb": 3.68,
     "host": "llm-server",
-    "loadavg_1m": 3.32568359375,
+    "loadavg_1m": 2.916015625,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -31,7 +31,7 @@
     },
     "python": "3.12.3",
     "sm": "8.6",
-    "timestamp": "2026-11-21T06:32:51+00:00"
+    "timestamp": "2026-11-21T06:56:32+00:00"
   },
   "script": "bench/serve_bench.py"
 }
