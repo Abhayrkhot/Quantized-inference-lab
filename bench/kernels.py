@@ -14,7 +14,8 @@ decoding does, so the Python launch cost of each library does not count. A kerne
 cannot be captured is timed eagerly instead, and the ``timing`` column says which.
 Effective bandwidth is the bytes a kernel must move (weights, scales, zeros, x, y) divided
 by its time, also shown as a fraction of this GPU's measured device-to-device copy bandwidth.
-Every kernel's output is checked against a float32 reference before it is timed.
+Every kernel's output is checked against a float32 reference before it is timed. For qlab's
+kernel, ``path`` records which of its code paths ran (see ``qlab.kernels.w4a16``).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from qlab.formats import QuantizedWeight, QuantSpec  # noqa: E402
-from qlab.kernels.w4a16 import pack_for_kernel, w4a16_matmul  # noqa: E402
+from qlab.kernels.w4a16 import kernel_path, pack_for_kernel, w4a16_matmul  # noqa: E402
 from qlab.results import write_rows  # noqa: E402
 
 SHAPES = {
@@ -115,6 +116,7 @@ def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str
                 t = do_bench(lambda fn=fn, x=x: fn(x), warmup=25, rep=100, return_mode="median")
                 mode = "eager"
             bw = (wbytes + io) / (t * 1e-3)
+            path = kernel_path(x, n, 128) if name.startswith("qlab") else ""
             rows.append(
                 {
                     "K": k,
@@ -127,6 +129,7 @@ def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str
                     "pct_copy_bw": round(100 * bw / peak, 1),
                     "rel_err": round(err, 5),
                     "timing": mode,
+                    "path": path,
                 }
             )
     return rows
@@ -135,7 +138,7 @@ def bench_shape(k: int, n: int, ms: list[int], dtype, peak: float, skip: set[str
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", default=list(SHAPES))
-    ap.add_argument("--m", type=int, nargs="+", default=[1, 2, 4, 8, 16, 64, 256, 1024])
+    ap.add_argument("--m", type=int, nargs="+", default=[1, 2, 4, 8, 16, 32, 64, 256, 1024])
     ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16"])
     ap.add_argument("--skip", nargs="*", default=[])
     ap.add_argument("--out", required=True)

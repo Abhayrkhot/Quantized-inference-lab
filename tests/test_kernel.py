@@ -16,18 +16,18 @@ SHAPES = {
 ALL = [(m, s) for m in SHAPES for s in SHAPES[m]]
 
 
-def _setup(k, n, dtype, sym=False, seed=0):
+def _setup(k, n, dtype, sym=False, seed=0, group=128):
     from qlab.kernels.w4a16 import pack_for_kernel
 
     g = torch.Generator(device="cuda").manual_seed(seed)
     w = torch.randn(n, k, device="cuda", generator=g) * 0.02
-    spec = QuantSpec(4, "group", 128, symmetric=sym)
+    spec = QuantSpec(4, "group", group, symmetric=sym)
     qw = QuantizedWeight.from_float(w, spec)
     packed = pack_for_kernel(qw.codes, qw.scale, qw.zero, spec, dtype)
     # reference uses the same rounded scales the kernel sees
-    ref_w = (qw.codes.float() - qw.zero.repeat_interleave(128, 1)) * packed[
+    ref_w = (qw.codes.float() - qw.zero.repeat_interleave(group, 1)) * packed[
         1
-    ].t().float().repeat_interleave(128, 1)
+    ].t().float().repeat_interleave(group, 1)
     return packed, ref_w
 
 
@@ -57,6 +57,85 @@ def test_prefill_shapes_and_dtypes(m, dtype):
     ref = x.float() @ ref_w.t()
     assert y.shape == (2, m, n)
     torch.testing.assert_close(y.float(), ref, rtol=2e-2, atol=2e-2 * ref.abs().max().item())
+
+
+@pytest.mark.parametrize("m", [1, 3, 8, 16, 100])
+@pytest.mark.parametrize("group", [32, 64, 256])
+def test_group_sizes(group, m):
+    """Group sizes other than 128 take the same kernels with smaller or larger K steps."""
+    from qlab.kernels.w4a16 import w4a16_matmul
+
+    k, n = 1024, 768
+    (qweight, scales, qzeros), ref_w = _setup(k, n, torch.bfloat16, group=group)
+    x = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+    y = w4a16_matmul(x, qweight, scales, qzeros, group)
+    ref = x.float() @ ref_w.t()
+    torch.testing.assert_close(y.float(), ref, rtol=2e-2, atol=2e-2 * ref.abs().max().item())
+
+
+@pytest.mark.parametrize("m", [1, 2, 5, 16])
+@pytest.mark.parametrize("shape", [(4096, 1024), (2048, 6144)], ids=["4096x1024", "2048x6144"])
+def test_decode_fp16(shape, m):
+    from qlab.kernels.w4a16 import w4a16_matmul
+
+    k, n = shape
+    (qweight, scales, qzeros), ref_w = _setup(k, n, torch.float16, sym=True)
+    x = torch.randn(m, k, device="cuda", dtype=torch.float16)
+    y = w4a16_matmul(x, qweight, scales, qzeros, 128)
+    ref = x.float() @ ref_w.t()
+    assert y.dtype == torch.float16 and y.shape == (m, n)
+    torch.testing.assert_close(y.float(), ref, rtol=2e-2, atol=2e-2 * ref.abs().max().item())
+
+
+@pytest.mark.parametrize("m", [1, 4, 300])
+def test_scales_dtype_may_differ(m):
+    """fp16 scales with bf16 activations (pack_for_kernel's default dtype is fp16)."""
+    from qlab.kernels.w4a16 import w4a16_matmul
+
+    k, n = 1024, 2048
+    (qweight, scales, qzeros), ref_w = _setup(k, n, torch.float16)
+    x = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+    y = w4a16_matmul(x, qweight, scales, qzeros, 128)
+    ref = x.float() @ ref_w.t()
+    assert y.dtype == torch.bfloat16
+    torch.testing.assert_close(y.float(), ref, rtol=2e-2, atol=2e-2 * ref.abs().max().item())
+
+
+@pytest.mark.parametrize("m", [1, 4, 16])
+def test_without_gluon(monkeypatch, m):
+    """The Triton-only paths (GEMV, tensor-core kernel) used where Gluon is unavailable."""
+    from qlab.kernels import w4a16
+
+    monkeypatch.setattr(w4a16, "_use_gluon", lambda x: False)
+    k, n = 2048, 1024
+    (qweight, scales, qzeros), ref_w = _setup(k, n, torch.bfloat16)
+    x = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+    y = w4a16.w4a16_matmul(x, qweight, scales, qzeros, 128)
+    ref = x.float() @ ref_w.t()
+    torch.testing.assert_close(y.float(), ref, rtol=2e-2, atol=2e-2 * ref.abs().max().item())
+
+
+def test_kernel_path():
+    from qlab.kernels import w4a16
+
+    def path(m):
+        return w4a16.kernel_path(
+            torch.zeros(m, 1024, device="cuda", dtype=torch.bfloat16), 2048, 128
+        )
+
+    assert path(1) == path(32) == "gluon"
+    assert path(48) == "triton"
+
+
+def test_dequant_then_cublas_path():
+    """The dequantize + cuBLAS path that large M may take matches the fused kernel's reference."""
+    from qlab.kernels import w4a16
+
+    k, n = 1024, 3072
+    (qweight, scales, qzeros), ref_w = _setup(k, n, torch.bfloat16)
+    w = w4a16.dequantize_weight(qweight, scales, qzeros, 128)
+    assert w.shape == (k, n) and w.dtype == torch.bfloat16
+    torch.testing.assert_close(w.float(), ref_w.t(), rtol=1e-2, atol=1e-3)
 
 
 def test_rejects_bad_shapes():
