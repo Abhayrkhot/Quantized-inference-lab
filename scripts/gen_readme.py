@@ -354,7 +354,10 @@ def t_m2_reference(
     note = (
         "Same model, calibration windows and evaluation code; the llm-compressor runs use its "
         "own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same "
-        "evaluation run in both images."
+        "evaluation run in both images. The symmetric gap is a convention difference: "
+        "compressed-tensors scales symmetric weights by absmax / 7.5 and uses codes -8..7, while "
+        "qlab uses absmax / 7 and codes -7..7, a 7% coarser step. Where the conventions agree "
+        "(asymmetric), the implementations match."
     )
     return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel_ref)
 
@@ -584,13 +587,33 @@ def t_m4_serve(root: Path, rel: str = "results/box/m4_serve.csv") -> str:
     return _serve_table(root, rel)
 
 
+def t_m5_smoke(root: Path) -> str:
+    rel_x, rel_b = "results/explorer/m5_smoke.csv", "results/box/m2_methods.csv"
+    xr, br = _rows(root, rel_x), _rows(root, rel_b)
+    if xr is None or br is None:
+        return "_Not run yet._"
+    b = {r["run"]: r for r in br}
+    head = ["Run (Qwen3-0.6B)", "Box WikiText-2", "H200 WikiText-2", "Δ", "Box C4", "H200 C4", "Δ"]
+    body = []
+    for r in xr:
+        if r["run"] not in b:
+            continue
+        cells = [_label(r) + " " + r["weights"]]
+        for d in ("wikitext2", "c4"):
+            x, y = float(r[f"{d}_ppl"]), float(b[r["run"]][f"{d}_ppl"])
+            cells += [f"{y:.3f}", f"{x:.3f}", f"{100 * (x - y) / y:+.2f}%"]
+        body.append(cells)
+    return _table(head, body) + "\n\n" + _source(root, rel_x)
+
+
 X = "results/explorer"
 TABLES: dict[str, Callable[[Path], str]] = {
     "m4_serve_4b": partial(t_m4_serve, rel="results/box/m4_serve_4b.csv"),
     "m4_qwen3_4b": partial(t_m2_17b, rel="results/box/m4_qwen3-4b.csv"),
-    "m5_smoke": partial(t_m2_17b, rel=f"{X}/m5_smoke.csv"),
+    "m5_smoke": t_m5_smoke,
     "m5_methods": partial(t_m2_methods, rel=f"{X}/m5_methods_8b.csv"),
-    "m5_w8a8_kv": partial(t_m2_17b, rel=f"{X}/m5_methods_8b.csv"),
+    "m5_w8a8": partial(t_m2_w8a8, rel=f"{X}/m5_methods_8b.csv"),
+    "m5_kv": partial(t_m2_kv, rel=f"{X}/m5_methods_8b.csv"),
     "m5_tasks": partial(t_m2_tasks, rel=f"{X}/m5_tasks_8b.csv"),
     "m5_kernels_a100": partial(t_m3_kernels, rel=f"{X}/m5_kernels_a100.csv"),
     "m5_kernels_h200": partial(t_m3_kernels, rel=f"{X}/m5_kernels_h200.csv"),

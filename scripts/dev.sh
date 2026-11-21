@@ -10,7 +10,7 @@ DATA=${QIL_DATA:-$HOME/qildata}
 HFC=${QIL_HF:-$HOME/.cache/huggingface}
 mkdir -p "$DATA/cache" "$DATA/ckpt" "$HFC"
 sha=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-git diff --quiet HEAD 2>/dev/null || sha="$sha-dirty"   # tracked changes only
+git diff --quiet HEAD -- . ':!results' 2>/dev/null || sha="$sha-dirty"   # tracked code changes only
 gpu=(); [ "${QIL_GPU:-1}" = 1 ] && gpu=(--gpus all)
 tty=(); [ -t 0 ] && [ -t 1 ] && tty=(-it)
 exec docker run --rm "${tty[@]}" "${gpu[@]}" --ipc=host --network host \
