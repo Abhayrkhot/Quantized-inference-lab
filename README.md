@@ -425,9 +425,13 @@ _Not run yet._
 
 Qwen3-4B-Base needs about 8 GB in BF16, twice this card's memory. GPTQ through block offload
 quantizes it on the same card, one decoder block at a time. The symmetric 4-bit export then
-serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load. On this card, what is left for the
-KV cache after the 4-bit weights limits the context to 1,024 tokens. Prefill runs in chunks of
-256 tokens, so its transient activations leave room for the cache.
+serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load. It needs three concessions on this card:
+
+* the 4-bit weights take 2.5 GiB of the 3.7, so the context is limited to 1,024 tokens;
+* the server runs in eager mode, because CUDA-graph compilation reserved 0.7 GiB of
+  transient activations;
+* the KV cache is sized explicitly (0.56 GiB), because vLLM's automatic sizing left no
+  blocks.
 
 <!-- qlab:begin m4_qwen3_4b -->
 _Not run yet._
