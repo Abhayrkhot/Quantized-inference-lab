@@ -279,17 +279,7 @@ memory. At 2 bits even KIVI degrades.
 ### Cross-check against llm-compressor
 
 <!-- qlab:begin m2_reference -->
-| Configuration | qlab WikiText-2 | llm-compressor | Δ | qlab C4 | llm-compressor | Δ |
-|---|---|---|---|---|---|---|
-| BF16 (evaluation parity) | 12.669 | 12.669 | +0.00% | 19.889 | 19.889 | +0.00% |
-| GPTQ int4 g128 asym | 14.775 | 14.773 | +0.02% | 23.042 | 22.962 | +0.35% |
-| GPTQ int4 g128 sym | 15.726 | 15.369 | +2.32% | 24.224 | 23.887 | +1.41% |
-| AWQ int4 g128 asym, no clip search | 14.251 | 14.245 | +0.05% | 22.143 | 22.165 | -0.10% |
-| SmoothQuant W8A8 α=0.5 | 12.884 | 12.890 | -0.05% | 20.216 | 20.236 | -0.10% |
-
-Same model, calibration windows and evaluation code; the llm-compressor runs use its own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same evaluation run in both images.
-
-<sub>Source: `results/box/m2_reference.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 12a2b40 · 2026-11-21</sub>
+_Not run yet._
 <!-- qlab:end m2_reference -->
 
 Zero-shot accuracy (lm-eval) is measured on Qwen3-8B in M5 rather than on the 0.6B
@@ -415,13 +405,7 @@ The check that the export is right: vLLM's own perplexity on the same WikiText-2
 from prompt log-probabilities, must match qlab's evaluation of the same run.
 
 <!-- qlab:begin m4_parity -->
-| Checkpoint | vLLM WikiText-2 | qlab WikiText-2 (same run) | Δ |
-|---|---|---|---|
-| bf16 | 12.67 | 12.67 | +0.01% |
-| qlab GPTQ int4 g128 sym | 15.74 | 15.73 | +0.07% |
-| qlab AWQ int4 g128 asym | 14.24 | 14.24 | -0.01% |
-
-<sub>Source: `results/box/m4_vllm_ppl.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+_Not run yet._
 <!-- qlab:end m4_parity -->
 
 The exports load through vLLM's own loader and kernels (GPTQ-Marlin, AWQ-Marlin), and
@@ -434,52 +418,22 @@ cache. The 4-bit checkpoints therefore hold far more tokens of context in flight
 which shows at high concurrency.
 
 <!-- qlab:begin m4_serve -->
-| Checkpoint | Weights GiB | KV cache tokens | Concurrency | TTFT p50 ms | TPOT p50 ms | Output tokens/s | Errors |
-|---|---|---|---|---|---|---|---|
-| Qwen3-0.6B bf16 | 1.12 | 7,680 | 1 | 16 | 8.57 | 115.8 | 0 |
-| Qwen3-0.6B bf16 | 1.12 | 7,680 | 16 | 43 | 10.39 | 1497.0 | 0 |
-| Qwen3-0.6B bf16 | 1.12 | 7,680 | 64 | 111 | 18.88 | 3119.4 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 1 | 12 | 4.83 | 204.5 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 16 | 34 | 6.71 | 2308.9 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 (GPTQ-Marlin) | 0.51 | 13,312 | 64 | 90 | 15.6 | 3935.7 | 0 |
-| Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 1 | 13 | 4.83 | 204.2 | 0 |
-| Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 16 | 37 | 6.68 | 2307.7 | 0 |
-| Qwen3-0.6B qlab AWQ int4 (AWQ-Marlin) | 0.51 | 13,312 | 64 | 91 | 15.73 | 3915.6 | 0 |
-| Qwen3-0.6B llm-compressor FP8-dynamic | 0.71 | 11,776 | 1 | 14 | 5.81 | 170.3 | 0 |
-| Qwen3-0.6B llm-compressor FP8-dynamic | 0.71 | 11,776 | 16 | 34 | 7.55 | 2068.1 | 0 |
-| Qwen3-0.6B llm-compressor FP8-dynamic | 0.71 | 11,776 | 64 | 99 | 16.15 | 3786.2 | 0 |
-| Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 1 | 18 | 8.59 | 115.4 | 0 |
-| Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 16 | 38 | 10.09 | 1550.5 | 0 |
-| Qwen3-0.6B bf16 + fp8 KV | 1.12 | 7,168 | 64 | 91 | 16.54 | 3382.8 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 1 | 12 | 4.84 | 203.8 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 16 | 29 | 6.39 | 2431.6 | 0 |
-| Qwen3-0.6B qlab GPTQ int4 + fp8 KV | 0.51 | 17,408 | 64 | 73 | 14.4 | 4299.7 | 0 |
-
-<sub>Source: `results/box/m4_serve.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+_Not run yet._
 <!-- qlab:end m4_serve -->
 
 ### A 4B model on a 4 GB laptop GPU
 
 Qwen3-4B-Base needs about 8 GB in BF16, twice this card's memory. GPTQ through block offload
 quantizes it on the same card, one decoder block at a time. The symmetric 4-bit export then
-serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load.
+serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load. What is left for the
+KV cache after the 4-bit weights limits the context to 1,024 tokens on this card.
 
 <!-- qlab:begin m4_qwen3_4b -->
-| Method | Weights | Activations | KV cache | Bits/weight | Model MB | WikiText-2 | Quantize s |
-|---|---|---|---|---|---|---|---|
-| BF16 | 16-bit | 16-bit | 16-bit | 16.00 | 7672 | 7.90 | 0.0 |
-| GPTQ (saved for export) | int4 g128 sym | 16-bit | 16-bit | 4.12 | 2529 | 8.34 | 2026.3 |
-
-<sub>Source: `results/box/m4_qwen3-4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 076f767 · 2026-11-21</sub>
+_Not run yet._
 <!-- qlab:end m4_qwen3_4b -->
 
 <!-- qlab:begin m4_serve_4b -->
-| Checkpoint | Weights GiB | KV cache tokens | Concurrency | TTFT p50 ms | TPOT p50 ms | Output tokens/s | Errors |
-|---|---|---|---|---|---|---|---|
-| Qwen3-4B bf16 | – | – | – | – | – | – | does not fit: CUDA out of memory while starting vLLM |
-| Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin) | – | – | – | – | – | – | vllm exited with 1 |
-
-<sub>Source: `results/box/m4_serve_4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 4ac5452-dirty · 2026-11-21</sub>
+_Not run yet._
 <!-- qlab:end m4_serve_4b -->
 
 ## Running it

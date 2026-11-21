@@ -97,7 +97,9 @@ def _stop(proc: subprocess.Popen) -> None:
 def _failure_reason(log_text: str, fallback: str) -> str:
     if "OutOfMemoryError" in log_text or "CUDA out of memory" in log_text:
         return "does not fit: CUDA out of memory while starting vLLM"
-    if "No available memory for the cache blocks" in log_text:
+    if "No available memory for the cache blocks" in log_text or (
+        "KV cache is needed, which is larger than the available KV cache memory" in log_text
+    ):
         return "does not fit: no GPU memory left for the KV cache"
     return fallback
 

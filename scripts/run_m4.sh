@@ -20,5 +20,5 @@ python3 bench/vllm_ppl.py --label "qlab AWQ int4 g128 asym" --model-dir /data/ex
 python3 bench/serve_bench.py --models configs/m4_serve_box.json --out results/box/m4_serve.csv
 python3 -m qlab run configs/m4_qwen3-4b.yaml --out results/box/m4_qwen3-4b.csv
 python3 -m qlab export /data/ckpt/qwen3-4b/gptq-w4g128-sym.pt /data/export/qwen3-4b-gptq-w4g128-sym --tokenizer Qwen/Qwen3-4B-Base
-python3 bench/serve_bench.py --models configs/m4_serve_box_4b.json --gpu-util 0.95 --max-model-len 2048 \
+python3 bench/serve_bench.py --models configs/m4_serve_box_4b.json --gpu-util 0.95 --max-model-len 1024 \
   --concurrency 1 8 --out results/box/m4_serve_4b.csv
