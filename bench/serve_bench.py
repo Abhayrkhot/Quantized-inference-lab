@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -80,6 +81,27 @@ def _parse_log(text: str) -> dict:
     return out
 
 
+def _stop(proc: subprocess.Popen) -> None:
+    """Stop the server's process group; it may already have exited (failed startup)."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=60)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+
+
+def _failure_reason(log_text: str, fallback: str) -> str:
+    if "OutOfMemoryError" in log_text or "CUDA out of memory" in log_text:
+        return "does not fit: CUDA out of memory while starting vLLM"
+    if "No available memory for the cache blocks" in log_text:
+        return "does not fit: no GPU memory left for the KV cache"
+    return fallback
+
+
 def bench_model(spec: dict, args, log_dir: Path) -> list[dict]:
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
@@ -121,12 +143,7 @@ def bench_model(spec: dict, args, log_dir: Path) -> list[dict]:
             rows.append(row)
             print(json.dumps(row), flush=True)
     finally:
-        os.killpg(proc.pid, signal.SIGTERM)
-        try:
-            proc.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+        _stop(proc)
         for _ in range(30):  # wait for the GPU memory to come back
             used = _gpu_used_mb()
             if used is None or used < 600:
@@ -162,7 +179,9 @@ def main() -> int:
         try:
             rows += bench_model(spec, args, log_dir)
         except (RuntimeError, TimeoutError) as e:
-            rows.append({"label": spec["label"], "model": spec["model"], "error": str(e)})
+            log = log_dir / f"vllm-{spec['label'].replace(' ', '_').replace('/', '_')}.log"
+            reason = _failure_reason(log.read_text() if log.exists() else "", str(e))
+            rows.append({"label": spec["label"], "model": spec["model"], "error": reason})
             print(f"{spec['label']}: {e}", flush=True)
         write_rows(out, rows, {"script": "bench/serve_bench.py", "args": vars(args)})
     return 0

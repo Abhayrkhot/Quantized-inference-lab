@@ -49,6 +49,7 @@ for stage in "$@"; do
     m4ref) QIL_IMAGE=qil-ref:latest scripts/dev.sh \
              'TRANSFORMERS_VERBOSITY=error python3 scripts/reference_llmc.py --save-fp8 /data/export/qwen3-0.6b-fp8-dynamic' ;;
     m4) wait_quiet; scripts/dev.sh scripts/run_m4.sh ;;
+    m4serve4b) wait_quiet; scripts/dev.sh 'PYTHONUNBUFFERED=1 python3 bench/serve_bench.py --models configs/m4_serve_box_4b.json --gpu-util 0.95 --max-model-len 2048 --concurrency 1 8 --out results/box/m4_serve_4b.csv' ;;
     *) echo "unknown stage $stage"; exit 2 ;;
   esac
   rc=$?
