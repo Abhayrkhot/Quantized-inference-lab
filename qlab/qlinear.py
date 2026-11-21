@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from .formats import QuantizedWeight, QuantSpec
-from .kernels.w4a16 import pack_for_kernel, w4a16_matmul
+from .kernels.w4a16 import pack_for_kernel, reserve_workspace, w4a16_matmul
 from .model import decoder_layers
 
 
@@ -55,6 +55,7 @@ def swap_in_quant_linears(
     """Replace every decoder linear with a QuantLinear (RTN-quantizing any not in ``quantized``)."""
     n = 0
     dtype = next(model.parameters()).dtype
+    widest = 0
     for i, layer in enumerate(decoder_layers(model)):
         for name, mod in list(layer.named_modules()):
             if not isinstance(mod, nn.Linear):
@@ -64,5 +65,9 @@ def swap_in_quant_linears(
             new = QuantLinear.from_quantized(qw, dtype, mod.bias)
             parent = layer.get_submodule(name.rsplit(".", 1)[0]) if "." in name else layer
             setattr(parent, name.rsplit(".", 1)[-1], new.to(mod.weight.device))
+            widest = max(widest, new.out_features)
             n += 1
+    if n:
+        # allocate the kernel's split-K workspace now, before any torch.compile / CUDA graph
+        reserve_workspace(next(model.parameters()).device, widest)
     return n

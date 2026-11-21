@@ -171,8 +171,14 @@ def test_quantlinear_model_matches_fake_quant_model():
     fq = transformers.Qwen3ForCausalLM(cfg).eval().cuda().to(torch.bfloat16)
     fq.load_state_dict(base.state_dict())
     quantize_rtn(fq, spec, "cuda")
+    from qlab.kernels import w4a16
+
+    w4a16._WORKSPACE.clear()
     n = swap_in_quant_linears(base, spec)
     assert n == 2 * 7 and isinstance(base.model.layers[0].mlp.down_proj, QuantLinear)
+    # the split-K workspace is allocated by the swap, before any torch.compile / graph capture
+    ws, _ = w4a16._WORKSPACE[torch.cuda.current_device()][-1]
+    assert ws.numel() >= w4a16.SMALL_M * 512
     with torch.no_grad():
         a = base(input_ids=ids).logits.float()
         b = fq(input_ids=ids).logits.float()

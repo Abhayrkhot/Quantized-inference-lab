@@ -563,8 +563,11 @@ def _workspace(device: torch.device, m: int, n: int) -> tuple[torch.Tensor, torc
 
     The kernel leaves both zeroed again. Buffers are only ever added, never freed, so a
     CUDA graph that captured an older one stays valid. One stream per device is assumed.
+    Allocate them with :func:`reserve_workspace` before ``torch.compile`` / CUDA-graph
+    capture: a buffer first allocated during graph warmup would live in the graph's pool.
     """
-    bufs = _WORKSPACE.setdefault(device.index, [])
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    bufs = _WORKSPACE.setdefault(index, [])
     tiles = triton.cdiv(m, 8) * triton.cdiv(n, 64)
     if not bufs or bufs[-1][0].numel() < m * n or bufs[-1][1].numel() < tiles:
         size = max(m * n, SMALL_M * 16384, bufs[-1][0].numel() if bufs else 0)
@@ -576,6 +579,13 @@ def _workspace(device: torch.device, m: int, n: int) -> tuple[torch.Tensor, torc
             )
         )
     return bufs[-1]
+
+
+def reserve_workspace(device: torch.device | str, n: int, m: int = SMALL_M) -> None:
+    """Allocate the split-K workspace for outputs up to ``m x n`` now (no-op off CUDA)."""
+    device = torch.device(device)
+    if device.type == "cuda":
+        _workspace(device, m, n)
 
 
 def _launch_small(a, qweight, scales, qzeros, group, m, n, k):
