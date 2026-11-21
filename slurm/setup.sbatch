@@ -25,7 +25,7 @@ in_image main python3 - <<'PY'
 import torch, triton, transformers, vllm
 print("main:", torch.__version__, triton.__version__, transformers.__version__, vllm.__version__)
 from huggingface_hub import snapshot_download
-for m in ["Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-1.7B-Base", "Qwen/Qwen3-8B-Base"]:
+for m in ["Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-8B-Base"]:
     snapshot_download(m, allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "merges.txt"])
     print("downloaded", m)
 from transformers import AutoTokenizer

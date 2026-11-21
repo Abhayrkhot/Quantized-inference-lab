@@ -21,8 +21,8 @@ files disagree.
 |---|---|---|
 | M0 | Integer formats, real 4-bit packing, honest byte accounting, tests, CI | done |
 | M1 | Perplexity evaluation on a real model; RTN baselines; activation outliers; block offload | done |
-| M2 | GPTQ, AWQ, SmoothQuant, FP8 / NF4, KV-cache quantization, checked against llm-compressor | code done, runs pending |
-| M3 | Triton W4A16 kernel vs cuBLAS, vLLM Marlin and bitsandbytes | code done, runs pending |
+| M2 | GPTQ, AWQ, SmoothQuant, FP8 / NF4, KV-cache quantization, checked against llm-compressor | done on the box; cross-check running |
+| M3 | Triton W4A16 kernel vs cuBLAS, vLLM Marlin and bitsandbytes | done on the box |
 | M4 | Export to GPTQ / AWQ checkpoints; vLLM perplexity parity and serving benchmarks | code done, runs pending |
 | M5 | The same pipeline on Qwen3-8B on A100 / H200 | not started |
 
@@ -192,20 +192,88 @@ train: 2048 tokens each for GPTQ, 512 for AWQ and SmoothQuant.
   - per (token, head);
   - KIVI-style: keys per channel over groups of 128 tokens, values per token.
 
+What the table shows:
+
+* **4 bits, groups of 128:** both calibrated methods recover a large share of RTN's
+  perplexity increase. AWQ is ahead of GPTQ on this model.
+* **3 bits:** calibration decides whether the model works at all. RTN is unusable, and GPTQ
+  and AWQ bring it back into a usable range.
+* **Coarse scales:** with one scale per output channel, GPTQ's error compensation matters
+  most, but groups still help more.
+* **Small effects:** act-order and AWQ's clipping search barely move the numbers here.
+  Symmetric weights cost some perplexity; GPTQ-Marlin requires them.
+* **NF4 (data-free, groups of 64)** lands close to calibrated INT4 for a little more storage.
+  FP8 is nearly lossless even with one scale per tensor, because its exponent covers the
+  range.
+* **Model size:** the 151k-token embedding (16-bit, tied with `lm_head`) dominates it at
+  4 bits, so the saving is far below 4×. On larger models it shrinks toward the linears'
+  ratio.
+
 <!-- qlab:begin m2_methods -->
-_Not run yet._
+| Method | Weights | Bits/weight | Model MB | WikiText-2 | C4 | Quantize s |
+|---|---|---|---|---|---|---|
+| BF16 | 16-bit | 16.00 | 1137 | 12.67 | 19.89 | 0.0 |
+| RTN | fp8 channel | 8.01 | 718 | 12.76 | 20.02 | 0.3 |
+| RTN | fp8 tensor | 8.00 | 717 | 12.75 | 20.02 | 0.3 |
+| RTN | int4 channel asym | 4.02 | 508 | 24.30 | 36.95 | 0.4 |
+| GPTQ | int4 channel asym | 4.02 | 508 | 17.44 | 26.86 | 332.8 |
+| RTN | int4 g128 asym | 4.16 | 515 | 16.16 | 25.11 | 0.8 |
+| GPTQ | int4 g128 asym | 4.16 | 515 | 14.78 | 23.04 | 416.7 |
+| GPTQ (act-order) | int4 g128 asym | 4.16 | 515 | 14.88 | 23.27 | 333.9 |
+| AWQ | int4 g128 asym | 4.16 | 515 | 14.24 | 22.14 | 271.2 |
+| AWQ (no clip search) | int4 g128 asym | 4.16 | 515 | 14.25 | 22.14 | 259.9 |
+| AWQ (saved for export) | int4 g128 asym | 4.16 | 515 | 14.24 | 22.14 | 263.8 |
+| GPTQ (saved for export) | int4 g128 sym | 4.12 | 513 | 15.73 | 24.22 | 341.5 |
+| RTN | nf4 g64 | 4.25 | 520 | 14.80 | 23.30 | 0.4 |
+| RTN | int3 g128 asym | 3.15 | 462 | 78.31 | 117.55 | 0.4 |
+| GPTQ | int3 g128 asym | 3.15 | 462 | 26.52 | 40.27 | 341.4 |
+| AWQ | int3 g128 asym | 3.15 | 462 | 23.13 | 33.87 | 266.1 |
+
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m2_methods -->
 
 ### W8A8
 
+SmoothQuant moves most of the per-token W8A8 loss into the weights, where 8 bits absorbs
+it. It also helps a lot with one activation scale per sequence, but cannot close that gap:
+the largest outliers (M1) are in the input of `down_proj`, which has no preceding norm to
+fold the scale into for free.
+
 <!-- qlab:begin m2_w8a8 -->
-_Not run yet._
+| Method | Weights | Activations | WikiText-2 | C4 |
+|---|---|---|---|---|
+| RTN | int8 channel sym | int8 per-token | 13.01 | 20.40 |
+| RTN | int8 channel sym | int8 per-tensor | 21.49 | 32.97 |
+| SmoothQuant (α=0.5) | int8 channel sym | int8 per-token | 12.88 | 20.22 |
+| SmoothQuant (α=0.75) | int8 channel sym | int8 per-token | 12.86 | 20.15 |
+| SmoothQuant (α=0.5) | int8 channel sym | int8 per-tensor | 17.50 | 26.85 |
+| SmoothQuant (α=0.75) | int8 channel sym | int8 per-tensor | 17.52 | 26.80 |
+
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m2_w8a8 -->
 
 ### KV cache
 
+**INT8 per token** costs almost nothing.
+
+**INT4 per token collapses the model.** Keys have a few outlier channels, and with one scale
+per token those channels set every token's scale.
+
+**The KIVI layout fixes it.** Keys get one scale per channel over groups of 128 tokens and
+values one per token, which brings INT4 back to near the 16-bit baseline at a quarter of the
+memory. At 2 bits even KIVI degrades.
+
 <!-- qlab:begin m2_kv -->
-_Not run yet._
+| Weights | KV cache | KV bytes/token | KV at 32k tokens | WikiText-2 | C4 |
+|---|---|---|---|---|---|
+| 16-bit | 16-bit | 114,688 | 3,584 MB | 12.67 | 19.89 |
+| 16-bit | int8 token | 59,136 | 1,848 MB | 12.77 | 20.05 |
+| 16-bit | int4 token | 30,464 | 952 MB | 3.5e+03 | 4.0e+03 |
+| 16-bit | int4 kivi | 30,464 | 952 MB | 12.93 | 20.28 |
+| 16-bit | int2 kivi | 16,128 | 504 MB | 46.32 | 70.87 |
+| GPTQ int4 g128 asym | int8 token | 59,136 | 1,848 MB | 14.96 | 23.29 |
+
+<sub>Source: `results/box/m2_methods.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m2_kv -->
 
 ### Cross-check against llm-compressor
@@ -214,28 +282,27 @@ _Not run yet._
 _Not run yet._
 <!-- qlab:end m2_reference -->
 
-### Zero-shot accuracy
-
-lm-eval 0.4.13, zero-shot, on the in-memory quantized model:
-
-<!-- qlab:begin m2_tasks -->
-_Not run yet._
-<!-- qlab:end m2_tasks -->
-
-### Qwen3-1.7B through block offload
-
-<!-- qlab:begin m2_17b -->
-_Not run yet._
-<!-- qlab:end m2_17b -->
+Zero-shot accuracy (lm-eval) is measured on Qwen3-8B in M5 rather than on the 0.6B
+development model.
 
 ## M3: a Triton W4A16 kernel
 
 `qlab/kernels/w4a16.py` computes `y = x · dequant(W)ᵀ` straight from the GPTQ checkpoint
-layout:
+layout: 4-bit codes eight per `int32` along K, with group-wise scales and zero points.
 
-* 4-bit codes eight per `int32` along K, with group-wise scales and zero points;
-* unpacked and dequantized in registers, FP32 accumulation through `tl.dot`;
-* split-K with FP32 atomics for decode-sized M, autotuned per shape bucket.
+* **M = 1 (decode): a GEMV without tensor cores.**
+  - Each packed word is loaded once and unpacked to all eight rows by a broadcast shift.
+  - Dequantization is one FMA per weight.
+  - Accumulation is element-wise in FP32, reduced once at the end; split-K combines with
+    atomics.
+* **M > 1 (batched decode, prefill): tensor cores.** The same packed load and unpack feeds
+  `tl.dot`.
+* Both kernels are autotuned per shape.
+
+The first version loaded each packed word once per row it held and used `tl.dot` for every
+M. On this card it reached about a third of copy bandwidth at decode and half of cuBLAS
+speed at prefill; the two changes above fixed most of both. Timings replay each call in a
+CUDA graph, as decoding does.
 
 It is checked against dequantize-then-matmul on every linear shape of Qwen3-0.6B, 1.7B and
 8B, at batch sizes 1–16 and prefill sizes. The same packed tensors also run through vLLM's
@@ -243,22 +310,88 @@ Marlin kernel, which matches the same reference. That is how the checkpoint layo
 to be the one vLLM expects.
 
 <!-- qlab:begin m3_kernels -->
-_Not run yet._
+| Model | M (tokens) | bf16 cuBLAS µs | qlab triton µs | qlab triton sym µs | vLLM marlin µs | bnb nf4 µs | triton vs bf16 | triton sym vs marlin |
+|---|---|---|---|---|---|---|---|---|
+| qwen3-0.6b | 1 | 208 | 78 | 78 | 60 | 109 | 2.67× | 0.77× |
+| qwen3-0.6b | 2 | 211 | 117 | 117 | 59 | 151 | 1.80× | 0.50× |
+| qwen3-0.6b | 4 | 213 | 118 | 118 | 59 | 266 | 1.80× | 0.50× |
+| qwen3-0.6b | 8 | 216 | 121 | 121 | 61 | 433 | 1.78× | 0.51× |
+| qwen3-0.6b | 16 | 221 | 127 | 128 | 81 | 438 | 1.74× | 0.63× |
+| qwen3-0.6b | 64 | 284 | 297 | 297 | 237 | 472 | 0.96× | 0.80× |
+| qwen3-0.6b | 256 | 820 | 952 | 950 | 733 | 1088 | 0.86× | 0.77× |
+| qwen3-0.6b | 1024 | 2785 | 3070 | 3057 | 2624 | 3098 | 0.91× | 0.86× |
+| qwen3-1.7b | 1 | 623 | 236 | 236 | 189 | 299 | 2.64× | 0.80× |
+| qwen3-1.7b | 2 | 696 | 362 | 361 | 188 | 412 | 1.92× | 0.52× |
+| qwen3-1.7b | 4 | 699 | 369 | 365 | 190 | 705 | 1.89× | 0.52× |
+| qwen3-1.7b | 8 | 704 | 380 | 377 | 195 | 787 | 1.85× | 0.52× |
+| qwen3-1.7b | 16 | 716 | 396 | 393 | 228 | 797 | 1.81× | 0.58× |
+| qwen3-1.7b | 64 | 943 | 800 | 802 | 598 | 1151 | 1.18× | 0.75× |
+| qwen3-1.7b | 256 | 2352 | 2416 | 2411 | 2094 | 3267 | 0.97× | 0.87× |
+| qwen3-1.7b | 1024 | 8435 | 9440 | 9401 | 8024 | 9354 | 0.89× | 0.85× |
+| qwen3-8b | 1 | 2284 | 835 | 835 | 643 | 1111 | 2.73× | 0.77× |
+| qwen3-8b | 2 | 2620 | 1240 | 1233 | 644 | 1534 | 2.11× | 0.52× |
+| qwen3-8b | 4 | 2555 | 1256 | 1251 | 649 | 2330 | 2.03× | 0.52× |
+| qwen3-8b | 8 | 2563 | 1295 | 1289 | 658 | 2367 | 1.98× | 0.51× |
+| qwen3-8b | 16 | 2622 | 1347 | 1341 | 788 | 2406 | 1.95× | 0.59× |
+| qwen3-8b | 64 | 3113 | 2836 | 2835 | 2034 | 3973 | 1.10× | 0.72× |
+| qwen3-8b | 256 | 8673 | 8918 | 8902 | 7916 | 12214 | 0.97× | 0.89× |
+| qwen3-8b | 1024 | 30816 | 35268 | 35117 | 30730 | 34474 | 0.87× | 0.88× |
+
+Time for all linear layers of one decoder block (q, k, v, o, gate, up, down), summed from per-shape medians. "triton sym vs marlin" above 1× means qlab's kernel is faster than Marlin on the same symmetric weights.
+
+<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m3_kernels -->
 
+Where it stands against the alternatives on the same card:
+
+* **Batch-1 decode:** the GEMV is well ahead of 16-bit cuBLAS on every model size, and within
+  reach of vLLM's Marlin, a hand-written CUDA kernel, without matching it.
+* **M = 2 to 16:** the tensor-core path still beats 16-bit, but Marlin is about twice as fast.
+  This is the main gap left. Marlin keeps the dequantized tile in the tensor-core operand
+  layout; the Triton kernel converts it through shared memory every step.
+* **Prefill:** both 4-bit kernels run close to 16-bit cuBLAS, as expected once the matmul is
+  compute-bound.
+
 Decode (M = 1) is limited by memory bandwidth. Effective bandwidth counts the bytes each
-kernel must read and write, as a share of this GPU's measured copy bandwidth:
+kernel must read and write, as a share of this GPU's measured device-to-device copy
+bandwidth. A copy both reads and writes, so a kernel that mostly reads, like 16-bit GEMV,
+can slightly exceed 100%.
 
 <!-- qlab:begin m3_bandwidth -->
-_Not run yet._
+| Model | K × N | bf16 cuBLAS % of copy BW | qlab triton % of copy BW | qlab triton sym % of copy BW | vLLM marlin % of copy BW | bnb nf4 % of copy BW |
+|---|---|---|---|---|---|---|
+| qwen3-0.6b | 1024 × 2048 | 92.8 | 62.0 | 61.9 | 80.2 | 49.6 |
+| qwen3-0.6b | 1024 × 1024 | 97.1 | 54.1 | 53.8 | 59.2 | 41.9 |
+| qwen3-0.6b | 2048 × 1024 | 83.9 | 58.9 | 58.9 | 77.8 | 49.0 |
+| qwen3-0.6b | 1024 × 3072 | 94.4 | 69.0 | 69.4 | 93.4 | 50.8 |
+| qwen3-0.6b | 3072 × 1024 | 88.1 | 67.5 | 68.0 | 93.7 | 53.4 |
+| qwen3-1.7b | 2048 × 2048 | 96.0 | 62.0 | 61.5 | 82.4 | 56.0 |
+| qwen3-1.7b | 2048 × 1024 | 84.9 | 60.4 | 60.5 | 79.4 | 50.3 |
+| qwen3-1.7b | 2048 × 6144 | 101.2 | 70.3 | 70.1 | 82.0 | 58.5 |
+| qwen3-1.7b | 6144 × 2048 | 98.0 | 68.6 | 68.5 | 88.9 | 59.6 |
+| qwen3-8b | 4096 × 4096 | 101.8 | 69.7 | 69.9 | 88.1 | 60.3 |
+| qwen3-8b | 4096 × 1024 | 91.0 | 60.3 | 60.3 | 88.5 | 55.9 |
+| qwen3-8b | 4096 × 12288 | 103.4 | 76.7 | 76.6 | 95.1 | 59.0 |
+| qwen3-8b | 12288 × 4096 | 103.0 | 70.3 | 70.4 | 96.8 | 59.8 |
+
+<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m3_bandwidth -->
 
 End to end, every decoder linear of Qwen3-0.6B is replaced by `QuantLinear`. A test checks
 that the swapped model computes the same function as the fake-quantized one. The result is
-timed in greedy batch-1 decoding with a static cache (compiled with CUDA graphs):
+timed in greedy batch-1 decoding with a static cache (compiled with CUDA graphs).
+
+On this model the 16-bit embedding and `lm_head` (311 MB, read every token) stay as they
+are, which caps the possible speedup well below the linears' 4×. Qwen3-8B on Explorer (M5)
+is the test for a larger share of quantized weights.
 
 <!-- qlab:begin m3_e2e -->
-_Not run yet._
+| Model | Linear weights | Weights MB | Decode tokens/s | ms/token | Prefill ms | Peak MB | Speedup |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B-Base | 16-bit | 1137 | 88.1 | 11.351 | 24.68 | 1233 | 1.00× |
+| Qwen3-0.6B-Base | int4 g128 asym (qlab triton) | 515 | 126.7 | 7.896 | 36.46 | 616 | 1.44× |
+
+<sub>Source: `results/box/m3_e2e.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
 <!-- qlab:end m3_e2e -->
 
 ## M4: vLLM checkpoints and serving

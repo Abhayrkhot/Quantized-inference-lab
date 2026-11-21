@@ -1,0 +1,189 @@
+{
+  "config": {
+    "batch_size": 4,
+    "datasets": [
+      "wikitext2",
+      "c4"
+    ],
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-0.6B-Base",
+    "name": "m2_methods",
+    "offload": false,
+    "runs": [
+      {
+        "method": "baseline"
+      },
+      {
+        "sweep": {
+          "bits": [
+            4,
+            3
+          ],
+          "granularity": [
+            "g128"
+          ],
+          "method": [
+            "rtn",
+            "gptq",
+            "awq"
+          ],
+          "symmetric": [
+            false
+          ]
+        }
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "gptq",
+        "save": "qwen3-0.6b/gptq-w4g128-sym.pt",
+        "symmetric": true
+      },
+      {
+        "act_order": true,
+        "bits": 4,
+        "granularity": "g128",
+        "method": "gptq",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "granularity": "channel",
+        "method": "gptq",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "clip": false,
+        "granularity": "g128",
+        "method": "awq",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "awq",
+        "save": "qwen3-0.6b/awq-w4g128-asym.pt",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "fmt": "nf4",
+        "granularity": "g64",
+        "method": "rtn"
+      },
+      {
+        "bits": 8,
+        "fmt": "fp8",
+        "granularity": "channel",
+        "method": "rtn"
+      },
+      {
+        "bits": 8,
+        "fmt": "fp8",
+        "granularity": "tensor",
+        "method": "rtn"
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "bits": 8,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": true
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "tensor",
+        "bits": 8,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": true
+      },
+      {
+        "sweep": {
+          "act_bits": [
+            8
+          ],
+          "act_granularity": [
+            "token",
+            "tensor"
+          ],
+          "alpha": [
+            0.5,
+            0.75
+          ],
+          "bits": [
+            8
+          ],
+          "granularity": [
+            "channel"
+          ],
+          "method": [
+            "smoothquant"
+          ],
+          "symmetric": [
+            true
+          ]
+        }
+      },
+      {
+        "kv_bits": 8,
+        "kv_mode": "token",
+        "method": "baseline"
+      },
+      {
+        "kv_bits": 4,
+        "kv_mode": "token",
+        "method": "baseline"
+      },
+      {
+        "kv_bits": 4,
+        "kv_mode": "kivi",
+        "method": "baseline"
+      },
+      {
+        "kv_bits": 2,
+        "kv_mode": "kivi",
+        "method": "baseline"
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "kv_bits": 8,
+        "kv_mode": "token",
+        "method": "gptq",
+        "symmetric": false
+      }
+    ],
+    "seqlen": 2048
+  },
+  "config_path": "configs/m2_methods_qwen3-0.6b.yaml",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "580.178.04",
+    "git": "5179acf",
+    "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_mem_gb": 3.68,
+    "host": "llm-server",
+    "loadavg_1m": 3.40625,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "8.6",
+    "timestamp": "2026-11-21T04:03:19+00:00"
+  }
+}
