@@ -56,7 +56,7 @@ def m1_rtn(out_dir: Path) -> Path | None:
         if r["method"] == "baseline" and r["acts"] == "16-bit"
     )
     fig, ax = plt.subplots(figsize=(7.5, 4.5), dpi=150)
-    grans = ["tensor", "channel", "g128", "g64", "g32"]
+    grans = ["channel", "g128", "g64", "g32"]  # per-tensor is off the chart at 3 and 4 bits
     for i, g in enumerate(grans):
         pts = sorted(
             (float(r["bits_per_weight"]), float(r["wikitext2_ppl"]))
@@ -65,30 +65,42 @@ def m1_rtn(out_dir: Path) -> Path | None:
             and r["granularity"] == g
             and r["symmetric"] == "False"
             and r["acts"] == "16-bit"
+            and r["bits"] in ("3", "4")
         )
         if not pts:
             continue
         xs, ys = zip(*pts, strict=True)
-        label = {"tensor": "per tensor", "channel": "per channel"}.get(g, f"groups of {g[1:]}")
+        label = "per channel" if g == "channel" else f"groups of {g[1:]}"
         ax.plot(
             xs,
             ys,
             color=SERIES[i],
             marker=MARKERS[i],
-            markersize=6,
+            markersize=7,
             linewidth=2,
             label=label,
             markeredgecolor=SURFACE,
             markeredgewidth=1.2,
         )
     ax.axhline(base, color=INK2, linewidth=1, linestyle=(0, (4, 3)))
-    ax.annotate(f"bf16 {base:.2f}", (8.3, base), color=INK2, fontsize=9, va="bottom", ha="right")
+    ax.annotate(f"BF16 {base:.2f}", (2.95, base * 1.06), color=INK2, fontsize=9)
     ax.set_yscale("log")
+    ax.set_xlim(2.9, 4.8)
     _style(
         ax,
-        "Qwen3-0.6B-Base: round-to-nearest, asymmetric",
-        "bits per weight (incl. scales)",
+        "Qwen3-0.6B-Base, round-to-nearest, asymmetric (3 and 4 bits)",
+        "bits per weight (including scales and zero points)",
         "WikiText-2 perplexity (log)",
+    )
+    ax.text(
+        0.99,
+        0.02,
+        "one scale per tensor: above 10^6 at both widths (see table)",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        color=INK2,
+        fontsize=8,
     )
     ax.legend(frameon=False, labelcolor=INK, fontsize=9)
     path = out_dir / "m1_rtn_ppl.png"
@@ -103,35 +115,38 @@ def m1_outliers(out_dir: Path) -> Path | None:
     if not rows:
         return None
     names = list(dict.fromkeys(r["linear"] for r in rows))
-    pick = [n for n in names if "layers.13." in n] or names[:2]
-    fig, axes = plt.subplots(1, len(pick), figsize=(4.2 * len(pick), 3.8), dpi=150, squeeze=False)
+    want = ["layers.2.mlp.down_proj", "layers.27.mlp.gate_proj"]
+    pick = [n for n in want if n in names] or names[:2]
+    fig, axes = plt.subplots(1, len(pick), figsize=(4.4 * len(pick), 3.8), dpi=150, squeeze=False)
     for ax, name in zip(axes[0], pick, strict=False):
         sel = [r for r in rows if r["linear"] == name]
         act = sorted((float(r["act_absmax"]) for r in sel), reverse=True)
         w = sorted((float(r["weight_absmax"]) for r in sel), reverse=True)
         a_med, w_med = act[len(act) // 2], w[len(w) // 2]
+        ranks = range(1, len(act) + 1)
         ax.plot(
-            range(len(act)),
+            ranks,
             [a / a_med for a in act],
             color=SERIES[0],
             linewidth=2,
-            label="activation (input channel)",
+            label="activation, per input channel",
         )
         ax.plot(
-            range(len(w)),
+            ranks,
             [v / w_med for v in w],
             color=SERIES[1],
             linewidth=2,
             linestyle=(0, (5, 2)),
-            label="weight (input column)",
+            label="weight, per input column",
         )
         ax.set_yscale("log")
-        ax.set_xscale("symlog", linthresh=10)
+        ax.set_xscale("log")
+        block, mod = name.split(".")[1], name.split(".", 2)[2]
         _style(
             ax,
-            name.replace("layers.", "block "),
-            "channel rank (largest first)",
-            "absmax / median channel",
+            f"block {block}: input of {mod}",
+            "channel rank (1 = largest)",
+            "absmax / median channel (log)",
         )
         ax.legend(frameon=False, labelcolor=INK, fontsize=8)
     fig.tight_layout()

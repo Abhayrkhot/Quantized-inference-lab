@@ -1,0 +1,8 @@
+[
+  {"label": "Qwen3-8B bf16", "model": "Qwen/Qwen3-8B-Base"},
+  {"label": "Qwen3-8B qlab GPTQ int4 (GPTQ-Marlin)", "model": "/scratch/USER/qil/data/export/qwen3-8b-gptq-w4g128-sym"},
+  {"label": "Qwen3-8B qlab AWQ int4 (AWQ-Marlin)", "model": "/scratch/USER/qil/data/export/qwen3-8b-awq-w4g128-asym"},
+  {"label": "Qwen3-8B llm-compressor FP8-dynamic", "model": "/scratch/USER/qil/data/export/qwen3-8b-fp8-dynamic"},
+  {"label": "Qwen3-8B bf16 + fp8 KV", "model": "Qwen/Qwen3-8B-Base", "args": ["--kv-cache-dtype", "fp8"]},
+  {"label": "Qwen3-8B qlab GPTQ int4 + fp8 KV", "model": "/scratch/USER/qil/data/export/qwen3-8b-gptq-w4g128-sym", "args": ["--kv-cache-dtype", "fp8"]}
+]
