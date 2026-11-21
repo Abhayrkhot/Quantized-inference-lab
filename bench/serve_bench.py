@@ -174,6 +174,7 @@ def main() -> int:
     log_dir = Path(os.environ.get("QIL_DATA", "/tmp")) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     rows = list(read_rows(out)) if out.exists() else []
+    rows = [r for r in rows if not r.get("error")]  # failed startups are retried
     done = {r["label"] for r in rows}
     for spec in specs:
         if spec["label"] in done:

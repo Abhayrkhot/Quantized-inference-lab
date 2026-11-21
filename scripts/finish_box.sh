@@ -18,6 +18,13 @@ for f in m4_vllm_ppl m4_serve m4_qwen3-4b m4_serve_4b m2_reference; do
   [ -s "results/box/$f.csv" ] || { echo "missing results/box/$f.csv"; missing=1; }
 done
 [ "$(grep -c '' results/box/m2_reference.csv 2>/dev/null)" -ge 6 ] || { echo "m2_reference incomplete"; missing=1; }
+# The 4B demo only counts if the 4-bit checkpoint actually served (BF16 is expected to fail).
+python3 - <<'PY' || missing=1
+import csv, sys
+rows = list(csv.DictReader(open("results/box/m4_serve_4b.csv")))
+ok = [r for r in rows if "GPTQ" in r["label"] and not r.get("error")]
+sys.exit(0 if ok else print("4B GPTQ checkpoint did not serve") or 1)
+PY
 QIL_GPU=0 scripts/dev.sh 'python3 scripts/plot_results.py'
 python3 scripts/gen_readme.py && python3 scripts/gen_readme.py --check || exit 1
 if [ "$missing" = 1 ]; then echo "not committing"; exit 1; fi
