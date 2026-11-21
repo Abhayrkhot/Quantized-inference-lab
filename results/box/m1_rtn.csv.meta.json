@@ -1,0 +1,90 @@
+{
+  "config": {
+    "batch_size": 4,
+    "datasets": [
+      "wikitext2",
+      "c4"
+    ],
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-0.6B-Base",
+    "name": "m1_rtn",
+    "offload": false,
+    "runs": [
+      {
+        "method": "baseline"
+      },
+      {
+        "sweep": {
+          "bits": [
+            8,
+            4,
+            3
+          ],
+          "granularity": [
+            "tensor",
+            "channel",
+            "g128",
+            "g64",
+            "g32"
+          ],
+          "method": [
+            "rtn"
+          ],
+          "symmetric": [
+            true,
+            false
+          ]
+        }
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "tensor",
+        "bits": 8,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": true
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "bits": 8,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": true
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "tensor",
+        "method": "baseline"
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "method": "baseline"
+      }
+    ],
+    "seqlen": 2048
+  },
+  "config_path": "configs/m1_rtn_qwen3-0.6b.yaml",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "580.178.04",
+    "git": "dff0328",
+    "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_mem_gb": 3.68,
+    "host": "llm-server",
+    "loadavg_1m": 3.201171875,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "8.6",
+    "timestamp": "2026-11-21T00:22:16+00:00"
+  }
+}

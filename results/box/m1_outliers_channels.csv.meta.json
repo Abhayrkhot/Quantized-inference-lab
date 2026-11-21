@@ -1,0 +1,27 @@
+{
+  "command": "outliers",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "580.178.04",
+    "git": "cd0c92e",
+    "gpu": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_mem_gb": 3.68,
+    "host": "llm-server",
+    "loadavg_1m": 4.4482421875,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "8.6",
+    "timestamp": "2026-11-21T00:37:47+00:00"
+  },
+  "model": "Qwen/Qwen3-0.6B-Base",
+  "n": 32,
+  "seqlen": 2048
+}

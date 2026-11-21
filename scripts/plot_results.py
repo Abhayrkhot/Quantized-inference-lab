@@ -94,11 +94,11 @@ def m1_rtn(out_dir: Path) -> Path | None:
     )
     ax.text(
         0.99,
-        0.02,
-        "one scale per tensor: above 10^6 at both widths (see table)",
+        0.66,
+        "one scale per tensor: above 10^6\nat both widths (see table)",
         transform=ax.transAxes,
         ha="right",
-        va="bottom",
+        va="top",
         color=INK2,
         fontsize=8,
     )

@@ -1,0 +1,4 @@
+run,model,method,weights,acts,kv,kv_bytes_per_token,bits,granularity,symmetric,bits_per_weight,linear_mb,model_mb,wikitext2_ppl,weight_rel_err,quant_s,eval_s,params
+baseline|16-bit|16-bit|,Qwen/Qwen3-1.7B-Base,baseline,16-bit,16-bit,16-bit,114688.0,16,,,16.0,2688.0,3281.74,9.3977,,0.0,140.9,
+rtn|int4 g128 asym|16-bit|,Qwen/Qwen3-1.7B-Base,rtn,int4 g128 asym,16-bit,16-bit,114688.0,4,g128,False,4.1562,698.25,1291.99,11.5313,0.011017738428080872,2.2,131.1,
+rtn|int4 channel asym|16-bit|,Qwen/Qwen3-1.7B-Base,rtn,int4 channel asym,16-bit,16-bit,114688.0,4,channel,False,4.0081,673.37,1267.1,16.8591,0.0230835314307894,2.1,130.5,
