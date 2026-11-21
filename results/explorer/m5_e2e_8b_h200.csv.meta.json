@@ -10,11 +10,11 @@
   "environment": {
     "cuda": "13.0",
     "driver": "570.86.15",
-    "git": "fa91529",
+    "git": "0d71e1d",
     "gpu": "NVIDIA H200",
     "gpu_mem_gb": 139.81,
-    "host": "d4053",
-    "loadavg_1m": 9.5654296875,
+    "host": "d4054",
+    "loadavg_1m": 16.2900390625,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -26,7 +26,7 @@
     },
     "python": "3.12.3",
     "sm": "9.0",
-    "timestamp": "2026-11-21T07:03:03+00:00"
+    "timestamp": "2026-11-21T22:40:02+00:00"
   },
   "script": "bench/e2e_decode.py"
 }

@@ -32,7 +32,7 @@ def _setup(k, n, dtype, sym=False, seed=0, group=128):
 
 
 @pytest.mark.parametrize("model,shape", ALL, ids=[f"{m}-{k}x{n}" for m, (k, n) in ALL])
-@pytest.mark.parametrize("m", [1, 2, 4, 8, 16])
+@pytest.mark.parametrize("m", [1, 2, 4, 8, 16, 32])
 def test_decode_shapes(model, shape, m):
     from qlab.kernels.w4a16 import w4a16_matmul
 

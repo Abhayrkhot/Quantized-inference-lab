@@ -674,9 +674,16 @@ def t_headline(root: Path) -> str:
             for x in k
         }
         shapes = BLOCK_SHAPES["qwen3-8b"]
+        meta_p = root / f"{rel}.meta.json"
+        rev = (
+            json.loads(meta_p.read_text()).get("environment", {}).get("git", "?")
+            if meta_p.exists()
+            else "?"
+        )
+        gpu = f"{gpu}, kernel at git {rev}"  # the kernel changed over time; say which one
 
-        def block(kernel, t=t, shapes=shapes):
-            return sum(t[("qwen3-8b", kk, nn, 1, kernel)] * c for (kk, nn), c in shapes.items())
+        def block(kernel, m=1, t=t, shapes=shapes):
+            return sum(t[("qwen3-8b", kk, nn, m, kernel)] * c for (kk, nn), c in shapes.items())
 
         rows.append(
             [
@@ -686,6 +693,22 @@ def t_headline(root: Path) -> str:
                 f"`{rel}`",
             ]
         )
+        batched = [
+            m
+            for m in (2, 4, 8, 16)
+            if all(("qwen3-8b", kk, nn, m, "vLLM marlin") in t for kk, nn in shapes)
+        ]
+        if batched:
+            vs16 = [block("bf16 cuBLAS", m) / block("qlab triton", m) for m in batched]
+            vsm = [block("vLLM marlin", m) / block("qlab triton sym", m) for m in batched]
+            rows.append(
+                [
+                    f"Triton W4A16, batched decode (M = 2-16), Qwen3-8B block ({gpu})",
+                    f"{min(vs16):.2f}-{max(vs16):.2f}× vs 16-bit cuBLAS · "
+                    f"{min(vsm):.2f}-{max(vsm):.2f}× Marlin's speed",
+                    f"`{rel}`",
+                ]
+            )
     s4 = _rows(root, "results/box/m4_serve_4b.csv")
     if s4:
         g = [

@@ -24,8 +24,10 @@ files disagree.
 | Qwen3-0.6B: WikiText-2 perplexity, int4 g128 | BF16 12.67 · RTN 16.16 · GPTQ 14.78 · AWQ 14.24 | `results/box/m2_methods.csv` |
 | GPTQ vs llm-compressor (same calibration and evaluation) | +0.02% WikiText-2 perplexity | `results/box/m2_reference.csv` |
 | Exported checkpoints in vLLM vs qlab's evaluation | within 0.07% perplexity | `results/box/m4_vllm_ppl.csv` |
-| Triton W4A16, batch-1 decode, Qwen3-8B block (RTX 3050 Ti) | 2.73× vs 16-bit cuBLAS · 0.77× Marlin's speed | `results/box/m3_kernels.csv` |
-| Triton W4A16, batch-1 decode, Qwen3-8B block (H200) | 1.45× vs 16-bit cuBLAS · 0.96× Marlin's speed | `results/explorer/m5_kernels_h200.csv` |
+| Triton W4A16, batch-1 decode, Qwen3-8B block (RTX 3050 Ti, kernel at git 8b566ce) | 3.63× vs 16-bit cuBLAS · 1.02× Marlin's speed | `results/box/m3_kernels.csv` |
+| Triton W4A16, batched decode (M = 2-16), Qwen3-8B block (RTX 3050 Ti, kernel at git 8b566ce) | 2.82-4.17× vs 16-bit cuBLAS · 0.85-1.03× Marlin's speed | `results/box/m3_kernels.csv` |
+| Triton W4A16, batch-1 decode, Qwen3-8B block (H200, kernel at git 0d71e1d) | 2.23× vs 16-bit cuBLAS · 1.51× Marlin's speed | `results/explorer/m5_kernels_h200.csv` |
+| Triton W4A16, batched decode (M = 2-16), Qwen3-8B block (H200, kernel at git 0d71e1d) | 1.34-2.26× vs 16-bit cuBLAS · 0.99-1.50× Marlin's speed | `results/explorer/m5_kernels_h200.csv` |
 | Qwen3-4B on a 4 GB laptop GPU (BF16 does not fit) | GPTQ int4 served by vLLM at 54.7 tokens/s | `results/box/m4_serve_4b.csv` |
 <!-- qlab:end headline -->
 
@@ -314,67 +316,99 @@ development model.
 `qlab/kernels/w4a16.py` computes `y = x · dequant(W)ᵀ` straight from the GPTQ checkpoint
 layout: 4-bit codes eight per `int32` along K, with group-wise scales and zero points.
 
-* **M = 1 (decode): a GEMV without tensor cores.**
-  - Each packed word is loaded once and unpacked to all eight rows by a broadcast shift.
-  - Dequantization is one FMA per weight.
-  - Accumulation is element-wise in FP32, reduced once at the end; split-K combines with
-    atomics.
-* **M > 1 (batched decode, prefill): tensor cores.** The same packed load and unpack feeds
-  `tl.dot`.
-* Both kernels are autotuned per shape.
+* **No integer-to-float conversion.** OR-ing a 4-bit code into the mantissa of a 16-bit float
+  with the right exponent gives that float plus the code (`0x4300 | q` is 128 + q in
+  bfloat16). Unpacking a code costs a shift, a `lop3` and one exact subtraction.
+* **M ≤ 32 (decode and batched decode): a kernel written in Gluon,** Triton's lower-level
+  dialect, where the kernel picks its own register layouts.
+  - It computes `yᵀ = W · xᵀ` on the tensor cores. The tokens are the MMA instruction's
+    8-wide side, so M ≤ 8 needs no padding.
+  - In the operand layout it uses, each thread holds eight consecutive K values of one weight
+    row, which is one packed word. Words go from global memory straight into registers, with
+    no shared memory and no barriers. The next step's words load during the current step's
+    math.
+  - One K step is one quantization group. The tensor cores take `q - z`, and the scale
+    multiplies the FP32 partial sum once per step instead of every weight.
+  - Split-K stays a single launch. Partial sums go to a workspace kept at zero, and the last
+    program of each tile writes the output.
+* **M > 32 (prefill): Triton.** The same dequantization feeds `tl.dot`. Where it measures
+  faster, the weight is instead dequantized into a 16-bit buffer and multiplied by cuBLAS.
+  The choice is timed per GPU, shape and batch-size bucket on first use.
+* All kernels are autotuned per shape.
 
-The first version loaded each packed word once per row it held and used `tl.dot` for every
-M. On this card it reached about a third of copy bandwidth at decode and half of cuBLAS
-speed at prefill; the two changes above fixed most of both. Timings replay each call in a
-CUDA graph, as decoding does.
+How it got here, on this card:
 
-It is checked against dequantize-then-matmul on every linear shape of Qwen3-0.6B, 1.7B and
-8B, at batch sizes 1–16 and prefill sizes. The same packed tensors also run through vLLM's
-Marlin kernel, which matches the same reference. That is how the checkpoint layout is known
-to be the one vLLM expects.
+1. The first version loaded each packed word once per row and used `tl.dot` for every M. It
+   reached about a third of copy bandwidth at decode.
+2. The second used a register-only GEMV at M = 1 and `tl.dot` above it. Integer-to-float
+   conversions, and moving each dequantized tile through shared memory, left M = 2 to 16 at
+   about half Marlin's speed.
+3. In the current version, the Gluon kernel replaces both.
+
+Timings replay each call in a CUDA graph, as decoding does.
+
+Correctness checks:
+
+* The kernel is checked against dequantize-then-matmul on every linear shape of Qwen3-0.6B,
+  1.7B and 8B, at batch sizes 1 to 32 and at prefill sizes.
+* The checks cover fp16 and bf16, group sizes 32 to 256, and the Triton-only paths used
+  without Gluon.
+* The same packed tensors also run through vLLM's Marlin kernel, which matches the same
+  reference. That is how the checkpoint layout is known to be the one vLLM expects.
 
 <!-- qlab:begin m3_kernels -->
 | Model | M (tokens) | bf16 cuBLAS µs | qlab triton µs | qlab triton sym µs | vLLM marlin µs | bnb nf4 µs | triton vs bf16 | triton sym vs marlin |
 |---|---|---|---|---|---|---|---|---|
-| qwen3-0.6b | 1 | 208 | 78 | 78 | 60 | 109 | 2.67× | 0.77× |
-| qwen3-0.6b | 2 | 211 | 117 | 117 | 59 | 151 | 1.80× | 0.50× |
-| qwen3-0.6b | 4 | 213 | 118 | 118 | 59 | 266 | 1.80× | 0.50× |
-| qwen3-0.6b | 8 | 216 | 121 | 121 | 61 | 433 | 1.78× | 0.51× |
-| qwen3-0.6b | 16 | 221 | 127 | 128 | 81 | 438 | 1.74× | 0.63× |
-| qwen3-0.6b | 64 | 284 | 297 | 297 | 237 | 472 | 0.96× | 0.80× |
-| qwen3-0.6b | 256 | 820 | 952 | 950 | 733 | 1088 | 0.86× | 0.77× |
-| qwen3-0.6b | 1024 | 2785 | 3070 | 3057 | 2624 | 3098 | 0.91× | 0.86× |
-| qwen3-1.7b | 1 | 623 | 236 | 236 | 189 | 299 | 2.64× | 0.80× |
-| qwen3-1.7b | 2 | 696 | 362 | 361 | 188 | 412 | 1.92× | 0.52× |
-| qwen3-1.7b | 4 | 699 | 369 | 365 | 190 | 705 | 1.89× | 0.52× |
-| qwen3-1.7b | 8 | 704 | 380 | 377 | 195 | 787 | 1.85× | 0.52× |
-| qwen3-1.7b | 16 | 716 | 396 | 393 | 228 | 797 | 1.81× | 0.58× |
-| qwen3-1.7b | 64 | 943 | 800 | 802 | 598 | 1151 | 1.18× | 0.75× |
-| qwen3-1.7b | 256 | 2352 | 2416 | 2411 | 2094 | 3267 | 0.97× | 0.87× |
-| qwen3-1.7b | 1024 | 8435 | 9440 | 9401 | 8024 | 9354 | 0.89× | 0.85× |
-| qwen3-8b | 1 | 2284 | 835 | 835 | 643 | 1111 | 2.73× | 0.77× |
-| qwen3-8b | 2 | 2620 | 1240 | 1233 | 644 | 1534 | 2.11× | 0.52× |
-| qwen3-8b | 4 | 2555 | 1256 | 1251 | 649 | 2330 | 2.03× | 0.52× |
-| qwen3-8b | 8 | 2563 | 1295 | 1289 | 658 | 2367 | 1.98× | 0.51× |
-| qwen3-8b | 16 | 2622 | 1347 | 1341 | 788 | 2406 | 1.95× | 0.59× |
-| qwen3-8b | 64 | 3113 | 2836 | 2835 | 2034 | 3973 | 1.10× | 0.72× |
-| qwen3-8b | 256 | 8673 | 8918 | 8902 | 7916 | 12214 | 0.97× | 0.89× |
-| qwen3-8b | 1024 | 30816 | 35268 | 35117 | 30730 | 34474 | 0.87× | 0.88× |
+| qwen3-0.6b | 1 | 209 | 51 | 51 | 60 | 110 | 4.09× | 1.16× |
+| qwen3-0.6b | 2 | 211 | 52 | 52 | 59 | 151 | 4.03× | 1.13× |
+| qwen3-0.6b | 4 | 213 | 53 | 53 | 60 | 266 | 4.01× | 1.13× |
+| qwen3-0.6b | 8 | 217 | 58 | 58 | 62 | 435 | 3.73× | 1.06× |
+| qwen3-0.6b | 16 | 222 | 89 | 89 | 81 | 440 | 2.50× | 0.91× |
+| qwen3-0.6b | 32 | 286 | 136 | 137 | 132 | 469 | 2.10× | 0.97× |
+| qwen3-0.6b | 64 | 285 | 281 | 281 | 238 | 475 | 1.02× | 0.85× |
+| qwen3-0.6b | 256 | 822 | 924 | 924 | 737 | 1091 | 0.89× | 0.80× |
+| qwen3-0.6b | 1024 | 2796 | 3090 | 3086 | 2645 | 3117 | 0.90× | 0.86× |
+| qwen3-1.7b | 1 | 625 | 172 | 171 | 190 | 305 | 3.63× | 1.11× |
+| qwen3-1.7b | 2 | 699 | 174 | 174 | 189 | 423 | 4.02× | 1.09× |
+| qwen3-1.7b | 4 | 703 | 178 | 178 | 191 | 718 | 3.95× | 1.08× |
+| qwen3-1.7b | 8 | 710 | 183 | 183 | 196 | 798 | 3.89× | 1.07× |
+| qwen3-1.7b | 16 | 721 | 260 | 261 | 232 | 811 | 2.77× | 0.89× |
+| qwen3-1.7b | 32 | 750 | 438 | 440 | 347 | 848 | 1.71× | 0.79× |
+| qwen3-1.7b | 64 | 958 | 798 | 799 | 608 | 1167 | 1.20× | 0.76× |
+| qwen3-1.7b | 256 | 2390 | 2384 | 2380 | 2132 | 3316 | 1.00× | 0.90× |
+| qwen3-1.7b | 1024 | 8550 | 9603 | 9564 | 8181 | 9518 | 0.89× | 0.86× |
+| qwen3-8b | 1 | 2285 | 630 | 628 | 643 | 1115 | 3.63× | 1.02× |
+| qwen3-8b | 2 | 2624 | 629 | 627 | 644 | 1545 | 4.17× | 1.03× |
+| qwen3-8b | 4 | 2559 | 637 | 636 | 650 | 2344 | 4.02× | 1.02× |
+| qwen3-8b | 8 | 2564 | 652 | 653 | 658 | 2374 | 3.93× | 1.01× |
+| qwen3-8b | 16 | 2625 | 931 | 928 | 793 | 2421 | 2.82× | 0.85× |
+| qwen3-8b | 32 | 2998 | 1604 | 1608 | 1174 | 2556 | 1.87× | 0.73× |
+| qwen3-8b | 64 | 3138 | 2736 | 2732 | 2055 | 4014 | 1.15× | 0.75× |
+| qwen3-8b | 256 | 8760 | 9013 | 8979 | 7987 | 12322 | 0.97× | 0.89× |
+| qwen3-8b | 1024 | 30988 | 35686 | 35488 | 31054 | 34776 | 0.87× | 0.88× |
 
 Time for all linear layers of one decoder block (q, k, v, o, gate, up, down), summed from per-shape medians. "triton sym vs marlin" above 1× means qlab's kernel is faster than Marlin on the same symmetric weights.
 
-<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
+<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 8b566ce · 2026-11-21</sub>
 <!-- qlab:end m3_kernels -->
 
-Where it stands against the alternatives on the same card:
+Where it stands against the alternatives on the same card (8B block unless noted):
 
-* **Batch-1 decode:** the GEMV is well ahead of 16-bit cuBLAS on every model size, and within
-  reach of vLLM's Marlin, a hand-written CUDA kernel, without matching it.
-* **M = 2 to 16:** the tensor-core path still beats 16-bit, but Marlin is about twice as fast.
-  This is the main gap left. Marlin keeps the dequantized tile in the tensor-core operand
-  layout; the Triton kernel converts it through shared memory every step.
-* **Prefill:** both 4-bit kernels run close to 16-bit cuBLAS, as expected once the matmul is
-  compute-bound.
+* **Decode, M = 1 to 8:** 3.6-4.2× faster than 16-bit cuBLAS and level with vLLM's Marlin,
+  a hand-written CUDA kernel (1.01-1.03× its speed). On the smaller 0.6B and 1.7B blocks,
+  where fixed costs weigh more, it is 6-16% faster than Marlin. The three large 8B matrices
+  are read at 95-99% of this card's measured copy bandwidth (table below).
+* **M = 16 and 32:** 0.85× and 0.73× of Marlin's speed. The previous kernel ran M = 2 to 16
+  at about half Marlin's speed.
+* **Prefill (M ≥ 64):** about where the previous kernel was: 0.75-0.89× of Marlin's speed and
+  0.87-1.15× of 16-bit cuBLAS. On this card the dequantize + cuBLAS path won on 2 of the 13
+  shapes at M = 256 and none at 1024 (the CSV's `path` column says which path ran).
+
+This table was tuned with Triton's default autotune timer, which runs each config eagerly
+after flushing L2. On this power-capped card the SM clock recovers during the flush, which
+favours compute-heavy configs. An exhaustive sweep found configs up to 18% faster at M = 32
+than the ones picked. The kernel now tunes by timing CUDA-graph replays (git 0d71e1d), but
+this card's table was not re-run after that change. The H200 table in M5 was.
 
 Decode (M = 1) is limited by memory bandwidth. Effective bandwidth counts the bytes each
 kernel must read and write, as a share of this GPU's measured device-to-device copy
@@ -384,21 +418,21 @@ can slightly exceed 100%.
 <!-- qlab:begin m3_bandwidth -->
 | Model | K × N | bf16 cuBLAS % of copy BW | qlab triton % of copy BW | qlab triton sym % of copy BW | vLLM marlin % of copy BW | bnb nf4 % of copy BW |
 |---|---|---|---|---|---|---|
-| qwen3-0.6b | 1024 × 2048 | 92.8 | 62.0 | 61.9 | 80.2 | 49.6 |
-| qwen3-0.6b | 1024 × 1024 | 97.1 | 54.1 | 53.8 | 59.2 | 41.9 |
-| qwen3-0.6b | 2048 × 1024 | 83.9 | 58.9 | 58.9 | 77.8 | 49.0 |
-| qwen3-0.6b | 1024 × 3072 | 94.4 | 69.0 | 69.4 | 93.4 | 50.8 |
-| qwen3-0.6b | 3072 × 1024 | 88.1 | 67.5 | 68.0 | 93.7 | 53.4 |
-| qwen3-1.7b | 2048 × 2048 | 96.0 | 62.0 | 61.5 | 82.4 | 56.0 |
-| qwen3-1.7b | 2048 × 1024 | 84.9 | 60.4 | 60.5 | 79.4 | 50.3 |
-| qwen3-1.7b | 2048 × 6144 | 101.2 | 70.3 | 70.1 | 82.0 | 58.5 |
-| qwen3-1.7b | 6144 × 2048 | 98.0 | 68.6 | 68.5 | 88.9 | 59.6 |
-| qwen3-8b | 4096 × 4096 | 101.8 | 69.7 | 69.9 | 88.1 | 60.3 |
-| qwen3-8b | 4096 × 1024 | 91.0 | 60.3 | 60.3 | 88.5 | 55.9 |
-| qwen3-8b | 4096 × 12288 | 103.4 | 76.7 | 76.6 | 95.1 | 59.0 |
-| qwen3-8b | 12288 × 4096 | 103.0 | 70.3 | 70.4 | 96.8 | 59.8 |
+| qwen3-0.6b | 1024 × 2048 | 92.3 | 109.3 | 109.1 | 78.2 | 48.5 |
+| qwen3-0.6b | 1024 × 1024 | 96.1 | 74.6 | 72.4 | 59.5 | 41.4 |
+| qwen3-0.6b | 2048 × 1024 | 83.8 | 89.8 | 89.6 | 78.0 | 49.2 |
+| qwen3-0.6b | 1024 × 3072 | 94.6 | 104.0 | 104.1 | 93.4 | 50.9 |
+| qwen3-0.6b | 3072 × 1024 | 87.5 | 104.3 | 104.6 | 93.5 | 52.7 |
+| qwen3-1.7b | 2048 × 2048 | 95.7 | 94.4 | 97.0 | 82.3 | 54.3 |
+| qwen3-1.7b | 2048 × 1024 | 83.6 | 88.7 | 89.1 | 77.6 | 49.1 |
+| qwen3-1.7b | 2048 × 6144 | 101.0 | 92.8 | 92.8 | 81.7 | 57.1 |
+| qwen3-1.7b | 6144 × 2048 | 97.7 | 91.2 | 91.0 | 88.5 | 59.4 |
+| qwen3-8b | 4096 × 4096 | 101.6 | 94.9 | 94.9 | 87.6 | 58.8 |
+| qwen3-8b | 4096 × 1024 | 90.9 | 85.4 | 85.9 | 88.5 | 55.6 |
+| qwen3-8b | 4096 × 12288 | 103.3 | 97.0 | 97.2 | 95.1 | 58.8 |
+| qwen3-8b | 12288 × 4096 | 102.9 | 98.9 | 99.2 | 97.0 | 60.2 |
 
-<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 5179acf · 2026-11-21</sub>
+<sub>Source: `results/box/m3_kernels.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 8b566ce · 2026-11-21</sub>
 <!-- qlab:end m3_bandwidth -->
 
 End to end, every decoder linear of Qwen3-0.6B is replaced by `QuantLinear`. A test checks
@@ -408,6 +442,11 @@ timed in greedy batch-1 decoding with a static cache (compiled with CUDA graphs)
 On this model the 16-bit embedding and `lm_head` (311 MB, read every token) stay as they
 are, which caps the possible speedup well below the linears' 4×. Qwen3-8B on Explorer (M5)
 is the test for a larger share of quantized weights.
+
+**This table is still from the previous kernel** (git 5179acf). The run with the new kernel
+failed here: its split-K workspace was first allocated inside torch.compile's CUDA-graph
+warmup. Git 0b7ea39 fixes that, and the H200 end-to-end runs in M5 include the fix, but the
+run on this card was not repeated.
 
 <!-- qlab:begin m3_e2e -->
 | Model | Linear weights | Weights MB | Decode tokens/s | ms/token | Prefill ms | Peak MB | Speedup |
@@ -594,59 +633,71 @@ separates the methods more clearly than accuracy does.
 ### Kernels on the H200
 
 The H200 moves data about 25× faster than the laptop card, so at these sizes fixed
-per-launch latency matters as much as bandwidth. On the kernels:
+per-launch latency matters as much as bandwidth. On the kernels (8B block):
 
-* **Batch-1 decode:** the GEMV is still well ahead of 16-bit cuBLAS. It matches or beats
-  Marlin, whose fixed cost dominates on small matrices.
-* **M ≥ 2 and prefill:** the Triton tensor-core path is slower than 16-bit cuBLAS here. It was
-  tuned only on the Ampere laptop card and does not use Hopper's warp-group MMA or TMA.
+* **Decode, M = 1 to 8:** 1.9-2.3× faster than 16-bit cuBLAS and 1.3-1.5× faster than
+  Marlin, whose fixed cost dominates on these matrices. The previous kernel was 0.8× of
+  cuBLAS at M = 2 to 8. At M = 1 it moves data at 35-58% of the H200's copy bandwidth on
+  the 8B shapes, against 76-88% for 16-bit cuBLAS. A deeper load pipeline is the obvious
+  next step here. The small-M kernel uses the Ampere `mma` instruction, which Hopper still
+  runs, not warp-group MMA.
+* **M = 16 to 64:** level with Marlin at M = 16 and 0.86-0.87× of it at M = 32 and 64.
+  Against 16-bit cuBLAS it goes from 1.34× at M = 16 to 0.65× at M = 64.
+* **M ≥ 256:** the kernel times both large-M paths on first use and picked dequantize +
+  cuBLAS for every shape here. That reaches 0.60-0.84× of 16-bit cuBLAS (the previous fused
+  kernel reached 0.34-0.48×) and matches or beats Marlin (1.02× at M = 256, 1.55× at 1024).
   Marlin and bitsandbytes hold up better.
 
 <!-- qlab:begin m5_kernels_h200 -->
 | Model | M (tokens) | bf16 cuBLAS µs | qlab triton µs | qlab triton sym µs | vLLM marlin µs | bnb nf4 µs | triton vs bf16 | triton sym vs marlin |
 |---|---|---|---|---|---|---|---|---|
-| qwen3-0.6b | 1 | 44 | 30 | 31 | 64 | 26 | 1.44× | 2.08× |
-| qwen3-0.6b | 2 | 44 | 47 | 47 | 64 | 33 | 0.95× | 1.36× |
-| qwen3-0.6b | 4 | 35 | 47 | 47 | 64 | 48 | 0.75× | 1.35× |
-| qwen3-0.6b | 8 | 30 | 47 | 47 | 64 | 75 | 0.63× | 1.35× |
-| qwen3-0.6b | 16 | 30 | 48 | 48 | 67 | 90 | 0.62× | 1.39× |
-| qwen3-0.6b | 64 | 31 | 61 | 61 | 112 | 65 | 0.50× | 1.83× |
-| qwen3-0.6b | 256 | 35 | 150 | 149 | 83 | 96 | 0.23× | 0.55× |
-| qwen3-0.6b | 1024 | 61 | 181 | 181 | 142 | 86 | 0.34× | 0.78× |
-| qwen3-1.7b | 1 | 59 | 44 | 44 | 61 | 44 | 1.35× | 1.39× |
-| qwen3-1.7b | 2 | 59 | 69 | 69 | 61 | 66 | 0.86× | 0.89× |
-| qwen3-1.7b | 4 | 49 | 69 | 69 | 61 | 104 | 0.71× | 0.89× |
-| qwen3-1.7b | 8 | 40 | 69 | 69 | 61 | 119 | 0.58× | 0.88× |
-| qwen3-1.7b | 16 | 41 | 69 | 69 | 65 | 124 | 0.60× | 0.94× |
-| qwen3-1.7b | 64 | 44 | 105 | 105 | 110 | 107 | 0.42× | 1.05× |
-| qwen3-1.7b | 256 | 61 | 258 | 258 | 130 | 123 | 0.24× | 0.51× |
-| qwen3-1.7b | 1024 | 169 | 410 | 410 | 323 | 226 | 0.41× | 0.79× |
-| qwen3-8b | 1 | 121 | 84 | 84 | 81 | 109 | 1.45× | 0.96× |
-| qwen3-8b | 2 | 119 | 140 | 140 | 81 | 165 | 0.85× | 0.58× |
-| qwen3-8b | 4 | 117 | 141 | 140 | 81 | 270 | 0.83× | 0.58× |
-| qwen3-8b | 8 | 119 | 141 | 141 | 81 | 305 | 0.84× | 0.57× |
-| qwen3-8b | 16 | 119 | 146 | 146 | 87 | 306 | 0.81× | 0.59× |
-| qwen3-8b | 64 | 120 | 190 | 191 | 158 | 342 | 0.63× | 0.83× |
-| qwen3-8b | 256 | 191 | 557 | 557 | 324 | 407 | 0.34× | 0.58× |
-| qwen3-8b | 1024 | 602 | 1261 | 1264 | 1122 | 825 | 0.48× | 0.89× |
+| qwen3-0.6b | 1 | 44 | 24 | 24 | 63 | 27 | 1.87× | 2.69× |
+| qwen3-0.6b | 2 | 41 | 24 | 24 | 63 | 34 | 1.71× | 2.60× |
+| qwen3-0.6b | 4 | 35 | 26 | 26 | 63 | 48 | 1.36× | 2.45× |
+| qwen3-0.6b | 8 | 30 | 27 | 27 | 63 | 75 | 1.09× | 2.33× |
+| qwen3-0.6b | 16 | 30 | 35 | 35 | 66 | 89 | 0.86× | 1.91× |
+| qwen3-0.6b | 32 | 30 | 40 | 40 | 75 | 116 | 0.75× | 1.88× |
+| qwen3-0.6b | 64 | 30 | 60 | 59 | 111 | 64 | 0.51× | 1.89× |
+| qwen3-0.6b | 256 | 36 | 55 | 55 | 83 | 96 | 0.64× | 1.49× |
+| qwen3-0.6b | 1024 | 61 | 80 | 80 | 141 | 86 | 0.76× | 1.76× |
+| qwen3-1.7b | 1 | 58 | 30 | 30 | 61 | 44 | 1.93× | 2.02× |
+| qwen3-1.7b | 2 | 53 | 31 | 31 | 61 | 67 | 1.69× | 1.96× |
+| qwen3-1.7b | 4 | 49 | 33 | 33 | 61 | 104 | 1.47× | 1.84× |
+| qwen3-1.7b | 8 | 40 | 36 | 36 | 62 | 119 | 1.12× | 1.71× |
+| qwen3-1.7b | 16 | 41 | 50 | 50 | 65 | 124 | 0.83× | 1.31× |
+| qwen3-1.7b | 32 | 42 | 61 | 61 | 74 | 132 | 0.70× | 1.21× |
+| qwen3-1.7b | 64 | 44 | 94 | 94 | 111 | 107 | 0.47× | 1.17× |
+| qwen3-1.7b | 256 | 60 | 101 | 102 | 130 | 123 | 0.59× | 1.28× |
+| qwen3-1.7b | 1024 | 168 | 203 | 204 | 324 | 228 | 0.83× | 1.59× |
+| qwen3-8b | 1 | 120 | 54 | 54 | 81 | 110 | 2.23× | 1.51× |
+| qwen3-8b | 2 | 121 | 54 | 54 | 81 | 166 | 2.26× | 1.50× |
+| qwen3-8b | 4 | 120 | 56 | 56 | 81 | 270 | 2.14× | 1.45× |
+| qwen3-8b | 8 | 119 | 62 | 61 | 81 | 303 | 1.92× | 1.32× |
+| qwen3-8b | 16 | 117 | 87 | 87 | 86 | 306 | 1.34× | 0.99× |
+| qwen3-8b | 32 | 122 | 123 | 122 | 106 | 312 | 1.00× | 0.87× |
+| qwen3-8b | 64 | 119 | 184 | 183 | 158 | 342 | 0.65× | 0.86× |
+| qwen3-8b | 256 | 189 | 316 | 317 | 324 | 409 | 0.60× | 1.02× |
+| qwen3-8b | 1024 | 605 | 716 | 717 | 1113 | 824 | 0.84× | 1.55× |
 
 Time for all linear layers of one decoder block (q, k, v, o, gate, up, down), summed from per-shape medians. "triton sym vs marlin" above 1× means qlab's kernel is faster than Marlin on the same symmetric weights.
 
-<sub>Source: `results/explorer/m5_kernels_h200.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_kernels_h200.csv` · NVIDIA H200 · torch 2.14.0 · git 0d71e1d · 2026-11-21</sub>
 <!-- qlab:end m5_kernels_h200 -->
 
-End to end, swapping Qwen3-8B's linears for the Triton kernel gives a smaller decode gain
-than on the laptop. The linears get faster, but on an H200 they are only part of each decode
-step (attention, norms, sampling and launches are not), while the 4-bit weights cut memory by
-more than half:
+End to end, swapping Qwen3-8B's linears for the kernel speeds up batch-1 decode by 1.35× on
+the H200; the previous kernel gave 1.11×. The linears get faster, but on an H200 they are
+only part of each decode step (attention, norms, sampling and launches are not), while the
+4-bit weights cut memory by more than half. Prefill runs eagerly in this benchmark (only the
+decode step is compiled), and int4 prefill got slower than with the previous kernel: 51.2 ms
+against 43.8 ms, and 28.5 ms with 16-bit weights:
 
 <!-- qlab:begin m5_e2e -->
 | Model | Linear weights | Weights MB | Decode tokens/s | ms/token | Prefill ms | Peak MB | Speedup |
 |---|---|---|---|---|---|---|---|
-| Qwen3-8B-Base | 16-bit | 15623 | 139.1 | 7.19 | 26.51 | 15780 | 1.00× |
-| Qwen3-8B-Base | int4 g128 asym (qlab triton) | 5816 | 154.5 | 6.474 | 43.81 | 5972 | 1.11× |
+| Qwen3-8B-Base | 16-bit | 15623 | 133.2 | 7.505 | 28.52 | 15780 | 1.00× |
+| Qwen3-8B-Base | int4 g128 asym (qlab triton) | 5816 | 180.5 | 5.54 | 51.19 | 6064 | 1.35× |
 
-<sub>Source: `results/explorer/m5_e2e_8b_h200.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<sub>Source: `results/explorer/m5_e2e_8b_h200.csv` · NVIDIA H200 · torch 2.14.0 · git 0d71e1d · 2026-11-21</sub>
 <!-- qlab:end m5_e2e -->
 
 ### Serving Qwen3-8B with vLLM
@@ -709,9 +760,19 @@ is.
   llm-compressor and the GPTQ reference use `absmax / 7.5` and −8..7, a finer step that is
   worth about 2% perplexity on Qwen3-0.6B. Asymmetric results, where conventions agree, match
   llm-compressor.
-* **Triton kernel.** It is competitive at batch-1 decode. For M = 2–16 it is about half
-  Marlin's speed, and on the H200 its tensor-core path is not tuned for Hopper. It does not
-  take act-order (`g_idx`) weights.
+* **Triton kernel.**
+  - On the laptop card it matches Marlin for M = 1 to 8 and trails it from M = 16 up
+    (0.73-0.89× on the 8B block). On the H200 it beats Marlin at M ≤ 8 and at M = 1024,
+    trails it at M = 32 and 64, and reads at 35-58% of copy bandwidth at M = 1.
+  - On the laptop card, the kernel table was tuned with the earlier eager timer, and the
+    end-to-end table is still from the previous kernel. Neither was re-run after the fixes
+    in git 0b7ea39 and 0d71e1d.
+  - On the H200, int4 prefill in the end-to-end benchmark (eager) is slower than with the
+    previous kernel.
+  - The fast path is written in Gluon, an experimental Triton dialect, and needs an Ampere or
+    newer GPU. Elsewhere the plain-Triton fallback runs, which is slower.
+  - The single-launch split-K keeps a workspace per device and assumes one CUDA stream.
+  - It does not take act-order (`g_idx`) weights.
 * **Methods:**
   - AWQ skips the `v_proj → o_proj` scaling group under grouped-query attention, as the
     reference does.

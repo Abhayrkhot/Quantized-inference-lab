@@ -1,14 +1,14 @@
 {
-  "copy_bandwidth_gbps": 4118.1,
+  "copy_bandwidth_gbps": 4125.2,
   "dtype": "bfloat16",
   "environment": {
     "cuda": "13.0",
     "driver": "570.86.15",
-    "git": "fa91529",
+    "git": "0d71e1d",
     "gpu": "NVIDIA H200",
     "gpu_mem_gb": 139.81,
-    "host": "d4053",
-    "loadavg_1m": 9.08203125,
+    "host": "d4054",
+    "loadavg_1m": 16.64599609375,
     "packages": {
       "datasets": "5.2.0",
       "lm_eval": "0.4.13",
@@ -20,7 +20,7 @@
     },
     "python": "3.12.3",
     "sm": "9.0",
-    "timestamp": "2026-11-21T07:00:23+00:00"
+    "timestamp": "2026-11-21T22:38:11+00:00"
   },
   "script": "bench/kernels.py"
 }
