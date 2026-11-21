@@ -5,8 +5,10 @@ Conventions (shared by every method in qlab and by the GPTQ checkpoint format it
 * Weights are 2-D ``[out_features, in_features]``, the layout of ``nn.Linear.weight``.
 * Codes are unsigned integers ``q`` in ``[0, 2**bits - 1]``; the dequantized value is
   ``(q - zero) * scale``.
-* Symmetric: ``zero`` is fixed at ``2**(bits - 1)`` and ``scale = absmax / (2**(bits - 1) - 1)``,
-  so ``[-absmax, absmax]`` is covered exactly and the most negative code goes unused.
+* Symmetric: ``zero`` is fixed at ``2**(bits - 1)`` and ``scale = absmax / (2**(bits - 1) - 0.5)``
+  (absmax / 7.5 at 4 bits), the convention of the GPTQ reference code and compressed-tensors.
+  ``+-absmax`` then sit half a step outside the outermost levels they round to, so the error
+  bound stays ``scale / 2`` with a step 7% finer than ``absmax / 7`` at 4 bits.
 * Asymmetric: the range ``[min(w, 0), max(w, 0)]`` is mapped onto all ``2**bits`` codes and
   ``zero`` is an integer code, so 0.0 is always exactly representable.
 * Groups run along the input dimension: group ``g`` covers input columns ``[g*G, (g+1)*G)``.
@@ -148,7 +150,7 @@ def compute_qparams(
     if spec.symmetric:
         absmax = wg.abs().amax(dim=-1) * clip
         half = 2 ** (spec.bits - 1)
-        scale = absmax / (half - 1)
+        scale = absmax / (half - 0.5)
         scale = torch.where(scale > 0, scale, torch.ones_like(scale))
         zero = torch.full_like(scale, float(half))
     else:

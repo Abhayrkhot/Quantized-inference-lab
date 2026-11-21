@@ -38,6 +38,7 @@ for stage in "$@"; do
   wait_gpu_free
   echo "== $stage $(date -Is) load $(cut -d' ' -f1 /proc/loadavg)"
   case $stage in
+    m1rtn) scripts/dev.sh 'PYTHONUNBUFFERED=1 TRANSFORMERS_VERBOSITY=error python3 -m qlab run configs/m1_rtn_qwen3-0.6b.yaml --out results/box/m1_rtn.csv' ;;
     m2) scripts/dev.sh 'scripts/run_m2.sh methods' ;;
     m2extra) scripts/dev.sh 'scripts/run_m2.sh extra' ;;
     m2ref) QIL_IMAGE=qil-ref:latest scripts/dev.sh \

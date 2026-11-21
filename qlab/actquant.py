@@ -3,6 +3,9 @@
 ``granularity="tensor"``: one dynamic scale per sequence (absmax over all its tokens and
 channels), which is what a single per-tensor scale amounts to. ``"token"``: one dynamic scale
 per token, as SmoothQuant and most INT8 serving kernels use.
+
+Symmetric, with the same convention as symmetric weights (``qlab.formats``):
+``scale = absmax / 127.5`` at 8 bits and codes -128..127.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ def fake_quant_act(x: torch.Tensor, bits: int = 8, granularity: str = "token") -
         )
     else:
         raise ValueError(f"activation granularity must be 'token' or 'tensor', got {granularity!r}")
-    scale = (amax.float() / qmax).clamp(min=1e-8)
+    scale = (amax.float() / (qmax + 0.5)).clamp(min=1e-8)
     return ((x.float() / scale).round().clamp(-qmax - 1, qmax) * scale).to(x.dtype)
 
 

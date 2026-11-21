@@ -41,7 +41,7 @@ def test_act_quant_error_bounded_and_token_beats_tensor_with_outliers(gran):
     x[:, 3, :] *= 50  # one loud token
     xq = fake_quant_act(x, 8, gran)
     amax = x.abs().amax(dim=-1, keepdim=True) if gran == "token" else x.abs().amax((1, 2), True)
-    assert torch.all((x - xq).abs() <= amax / 127 / 2 * (1 + 1e-5) + 1e-7)
+    assert torch.all((x - xq).abs() <= amax / 127.5 / 2 * (1 + 1e-5) + 1e-7)
     tok_err = (x - fake_quant_act(x, 8, "token")).pow(2).mean()
     ten_err = (x - fake_quant_act(x, 8, "tensor")).pow(2).mean()
     assert tok_err < ten_err

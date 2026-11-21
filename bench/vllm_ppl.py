@@ -55,7 +55,12 @@ def main() -> int:
     ap.add_argument("--windows", type=int, help="score only the first N windows (smoke tests)")
     ap.add_argument("--max-num-seqs", type=int, default=8)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--force", action="store_true", help="rerun a label already in --out")
     args = ap.parse_args()
+    out = Path(args.out)
+    if not args.force and out.exists() and any(r["label"] == args.label for r in read_rows(out)):
+        print(f"{args.label}: already in {out}, skipping (--force reruns it)", flush=True)
+        return 0
 
     from transformers import AutoTokenizer
 
@@ -80,7 +85,6 @@ def main() -> int:
             "qlab_wikitext2_ppl": q,
             "diff_pct": round(100 * (ppl - q) / q, 3),
         }
-    out = Path(args.out)
     rows = [r for r in read_rows(out) if r["label"] != args.label] if out.exists() else []
     rows.append(row)
     write_rows(out, rows, {"script": "bench/vllm_ppl.py"})

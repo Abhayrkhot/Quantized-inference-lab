@@ -49,6 +49,23 @@ def test_symmetric_zero_point_is_midpoint():
     assert torch.all(zero == 8)
 
 
+@pytest.mark.parametrize("bits", [2, 3, 4, 8])
+def test_symmetric_matches_gptq_reference(bits):
+    # The GPTQ reference quantizer: xmin = -absmax, scale = (xmax - xmin) / maxq,
+    # zero = (maxq + 1) / 2, q = clamp(round(w / scale) + zero, 0, maxq).
+    w = _w()
+    spec = QuantSpec(bits=bits, granularity="channel", symmetric=True)
+    scale, zero = compute_qparams(w, spec)
+    absmax = w.abs().amax(dim=1, keepdim=True)
+    ref_scale = 2 * absmax / spec.maxq
+    ref_q = torch.clamp(torch.round(w / ref_scale) + (spec.maxq + 1) // 2, 0, spec.maxq)
+    assert torch.allclose(scale, ref_scale, rtol=1e-6)
+    assert torch.equal(quantize(w, scale, zero, spec), ref_q.to(torch.uint8))
+    # Every weight, the clamped extremes included, is within half a step (absmax / maxq).
+    err = (w - fake_quant(w, spec)).abs()
+    assert torch.all(err <= absmax / spec.maxq * (1 + 1e-5) + 1e-6)  # + float32 ulp of w
+
+
 @pytest.mark.parametrize("bits", [8, 4])
 def test_mse_matches_uniform_noise_model_on_gaussian(bits):
     # For a Gaussian with a step well below sigma, rounding error is ~uniform: MSE = step^2 / 12.
