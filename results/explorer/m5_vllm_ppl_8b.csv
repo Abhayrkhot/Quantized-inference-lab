@@ -1,4 +1,4 @@
 label,model_dir,vllm_wikitext2_ppl,seconds,qlab_run,qlab_wikitext2_ppl,diff_pct
 bf16,Qwen/Qwen3-8B-Base,7.0025,9.1,baseline|16-bit|16-bit|,7.0027,-0.002
-qlab GPTQ int4 g128 sym,/scratch/$USER/qil/data/export/qwen3-8b-gptq-w4g128-sym,7.4538,8.5,gptq|int4 g128 sym|16-bit|save=qwen3-8b/gptq-w4g128-sym.pt,7.4536,0.003
 qlab AWQ int4 g128 asym,/scratch/$USER/qil/data/export/qwen3-8b-awq-w4g128-asym,7.2692,8.6,awq|int4 g128 asym|16-bit|save=qwen3-8b/awq-w4g128-asym.pt,7.2701,-0.013
+qlab GPTQ int4 g128 sym,/scratch/$USER/qil/data/export/qwen3-8b-gptq-w4g128-sym,7.3791,8.7,gptq|int4 g128 sym|16-bit|save=qwen3-8b/gptq-w4g128-sym.pt,7.3807,-0.022

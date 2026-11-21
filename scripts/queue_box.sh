@@ -2,7 +2,7 @@
 # Run milestone stages one after another on the box (host side), each in its container.
 #   setsid nohup scripts/queue_box.sh m2 m3 m4ref m4 m2extra m2ref > ~/qildata/logs/queue.log 2>&1 &
 # Waits for any GPU job started by scripts/bg.sh to finish first, and gates timing stages on a
-# quiet machine (1-minute load average below QIL_MAX_LOAD, default 3).
+# quiet machine (1-minute load average below QIL_MAX_LOAD, default 3) and a cool GPU.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 LOGS=${QIL_DATA:-$HOME/qildata}/logs
@@ -13,6 +13,14 @@ wait_quiet() {
     sleep 30
   done
   echo "load still high: $(cat /proc/loadavg); continuing" >&2
+}
+wait_cool() {  # laptop GPU: clocks drop as it heats, so timing stages start below QIL_MAX_TEMP C
+  for _ in $(seq 1 60); do
+    t=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | head -1)
+    [ "$t" -lt "${QIL_MAX_TEMP:-55}" ] && return 0
+    sleep 30
+  done
+  echo "GPU still at ${t} C; continuing" >&2
 }
 # Run from a clean clone at one commit, so edits synced into the working copy while the queue
 # runs cannot change the code under it, and every result carries a clean git revision.
@@ -46,15 +54,15 @@ for stage in "$@"; do
               for r in baseline gptq_w4g128_asym gptq_w4g128_sym awq_w4g128_asym smoothquant_w8a8; do
                 python3 scripts/reference_llmc.py --only $r --out results/box/m2_reference.csv || rc=1
               done; exit ${rc:-0}' ;;  # one process per recipe: llm-compressor keeps state between oneshot calls
-    m3) wait_quiet; scripts/dev.sh scripts/run_m3.sh ;;
+    m3) wait_quiet; wait_cool; scripts/dev.sh scripts/run_m3.sh ;;
     m4ref) QIL_IMAGE=qil-ref:latest scripts/dev.sh \
              'TRANSFORMERS_VERBOSITY=error python3 scripts/reference_llmc.py --save-fp8 /data/export/qwen3-0.6b-fp8-dynamic' ;;
-    m4) wait_quiet; scripts/dev.sh scripts/run_m4.sh ;;
-    m4serve4b) wait_quiet; scripts/dev.sh 'PYTHONUNBUFFERED=1 python3 bench/serve_bench.py --models configs/m4_serve_box_4b.json --gpu-util 0.95 --max-model-len 1024 --concurrency 1 8 --out results/box/m4_serve_4b.csv' ;;
+    m4) wait_quiet; wait_cool; scripts/dev.sh scripts/run_m4.sh ;;
+    m4serve4b) wait_quiet; wait_cool; scripts/dev.sh 'PYTHONUNBUFFERED=1 python3 bench/serve_bench.py --models configs/m4_serve_box_4b.json --gpu-util 0.95 --max-model-len 1024 --concurrency 1 8 --out results/box/m4_serve_4b.csv' ;;
     *) echo "unknown stage $stage"; exit 2 ;;
   esac
   rc=$?
-  rsync -a "$RUN/results/" "$REPO/results/"
+  rsync -a --update "$RUN/results/" "$REPO/results/"  # never over files another queue wrote since
   echo "== $stage exit $rc $(date -Is)"
   flock -u 9
 done
