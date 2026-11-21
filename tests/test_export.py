@@ -64,3 +64,13 @@ def test_asymmetric_gptq_result_exports_as_awq():
     torch.testing.assert_close(
         back, res.dequantize(), rtol=1e-3, atol=1e-6
     )  # scales are stored as fp16
+
+
+@pytest.mark.gpu
+def test_export_accepts_gpu_resident_results():
+    w = torch.randn(64, 256, device="cuda")
+    qw = QuantizedWeight.from_float(w, QuantSpec(4, "group", 128, symmetric=False))
+    t = export.awq_tensors(qw, "p")
+    assert all(v.device.type == "cpu" for v in t.values())
+    back = export.read_back(t, "p", "awq", 128)
+    torch.testing.assert_close(back, qw.dequantize().cpu(), rtol=1e-3, atol=1e-6)

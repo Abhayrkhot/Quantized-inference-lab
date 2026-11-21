@@ -20,6 +20,7 @@ import json
 import re
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -66,8 +67,7 @@ def _db(x: str) -> str:
     return "∞" if v == float("inf") else f"{v:.1f}"
 
 
-def t_m0_simulate(root: Path) -> str:
-    rel = "results/box/m0_simulate.csv"
+def t_m0_simulate(root: Path, rel: str = "results/box/m0_simulate.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -98,8 +98,7 @@ def _ppl(x: str) -> str:
     return f"{v:.1e}" if v >= 1000 else f"{v:.2f}"
 
 
-def t_m1_rtn(root: Path) -> str:
-    rel = "results/box/m1_rtn.csv"
+def t_m1_rtn(root: Path, rel: str = "results/box/m1_rtn.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -131,8 +130,7 @@ def t_m1_rtn(root: Path) -> str:
     return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel)
 
 
-def t_m1_w8a8(root: Path) -> str:
-    rel = "results/box/m1_rtn.csv"
+def t_m1_w8a8(root: Path, rel: str = "results/box/m1_rtn.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -147,8 +145,7 @@ def t_m1_w8a8(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m1_outliers(root: Path) -> str:
-    rel = "results/box/m1_outliers_summary.csv"
+def t_m1_outliers(root: Path, rel: str = "results/box/m1_outliers_summary.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -184,8 +181,7 @@ def t_m1_outliers(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m1_offload(root: Path) -> str:
-    rel = "results/box/m1_offload.csv"
+def t_m1_offload(root: Path, rel: str = "results/box/m1_offload.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -219,6 +215,8 @@ def _label(r: dict[str, str]) -> str:
         extra.append("act-order")
     if '"clip": false' in params:
         extra.append("no clip search")
+    if '"save": ' in params:
+        extra.append("saved for export")
     if '"alpha": ' in params:
         extra.append("α=" + params.split('"alpha": ')[1].split(",")[0].split("}")[0])
     return m + (f" ({', '.join(extra)})" if extra else "")
@@ -237,8 +235,7 @@ def _find(rows, method, weights, acts="16-bit", kv="16-bit", contains=None):
     return None
 
 
-def t_m2_methods(root: Path) -> str:
-    rel = "results/box/m2_methods.csv"
+def t_m2_methods(root: Path, rel: str = "results/box/m2_methods.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -267,8 +264,7 @@ def t_m2_methods(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m2_w8a8(root: Path) -> str:
-    rel = "results/box/m2_methods.csv"
+def t_m2_w8a8(root: Path, rel: str = "results/box/m2_methods.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -281,8 +277,7 @@ def t_m2_w8a8(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m2_kv(root: Path) -> str:
-    rel = "results/box/m2_methods.csv"
+def t_m2_kv(root: Path, rel: str = "results/box/m2_methods.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -326,8 +321,11 @@ REFERENCE_PAIRS = [
 ]
 
 
-def t_m2_reference(root: Path) -> str:
-    rel_ref, rel_ours = "results/box/m2_reference.csv", "results/box/m2_methods.csv"
+def t_m2_reference(
+    root: Path,
+    rel_ref: str = "results/box/m2_reference.csv",
+    rel_ours: str = "results/box/m2_methods.csv",
+) -> str:
     ref, ours = _rows(root, rel_ref), _rows(root, rel_ours)
     if ref is None or ours is None:
         return "_Not run yet._"
@@ -364,8 +362,7 @@ def t_m2_reference(root: Path) -> str:
 TASKS = ["arc_easy", "arc_challenge", "hellaswag", "piqa", "winogrande"]
 
 
-def t_m2_tasks(root: Path) -> str:
-    rel = "results/box/m2_tasks.csv"
+def t_m2_tasks(root: Path, rel: str = "results/box/m2_tasks.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -391,8 +388,7 @@ def t_m2_tasks(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m2_17b(root: Path) -> str:
-    rel = "results/box/m2_methods_1.7b.csv"
+def t_m2_17b(root: Path, rel: str = "results/box/m2_methods_1.7b.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -480,12 +476,11 @@ def _kernel_table(root: Path, rel: str) -> str:
     return _table(head, body) + "\n\n" + note + "\n\n" + _source(root, rel)
 
 
-def t_m3_kernels(root: Path) -> str:
-    return _kernel_table(root, "results/box/m3_kernels.csv")
+def t_m3_kernels(root: Path, rel: str = "results/box/m3_kernels.csv") -> str:
+    return _kernel_table(root, rel)
 
 
-def t_m3_bandwidth(root: Path) -> str:
-    rel = "results/box/m3_kernels.csv"
+def t_m3_bandwidth(root: Path, rel: str = "results/box/m3_kernels.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -503,8 +498,7 @@ def t_m3_bandwidth(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m3_e2e(root: Path) -> str:
-    rel = "results/box/m3_e2e.csv"
+def t_m3_e2e(root: Path, rel: str = "results/box/m3_e2e.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -534,8 +528,7 @@ def t_m3_e2e(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m4_parity(root: Path) -> str:
-    rel = "results/box/m4_vllm_ppl.csv"
+def t_m4_parity(root: Path, rel: str = "results/box/m4_vllm_ppl.csv") -> str:
     rows = _rows(root, rel)
     if rows is None:
         return "_Not run yet._"
@@ -587,11 +580,23 @@ def _serve_table(root: Path, rel: str) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel)
 
 
-def t_m4_serve(root: Path) -> str:
-    return _serve_table(root, "results/box/m4_serve.csv")
+def t_m4_serve(root: Path, rel: str = "results/box/m4_serve.csv") -> str:
+    return _serve_table(root, rel)
 
 
+X = "results/explorer"
 TABLES: dict[str, Callable[[Path], str]] = {
+    "m4_serve_4b": partial(t_m4_serve, rel="results/box/m4_serve_4b.csv"),
+    "m4_qwen3_4b": partial(t_m2_17b, rel="results/box/m4_qwen3-4b.csv"),
+    "m5_smoke": partial(t_m2_17b, rel=f"{X}/m5_smoke.csv"),
+    "m5_methods": partial(t_m2_methods, rel=f"{X}/m5_methods_8b.csv"),
+    "m5_w8a8_kv": partial(t_m2_17b, rel=f"{X}/m5_methods_8b.csv"),
+    "m5_tasks": partial(t_m2_tasks, rel=f"{X}/m5_tasks_8b.csv"),
+    "m5_kernels_a100": partial(t_m3_kernels, rel=f"{X}/m5_kernels_a100.csv"),
+    "m5_kernels_h200": partial(t_m3_kernels, rel=f"{X}/m5_kernels_h200.csv"),
+    "m5_e2e": partial(t_m3_e2e, rel=f"{X}/m5_e2e_8b_h200.csv"),
+    "m5_parity": partial(t_m4_parity, rel=f"{X}/m5_vllm_ppl_8b.csv"),
+    "m5_serve": partial(t_m4_serve, rel=f"{X}/m5_serve_8b_h200.csv"),
     "m3_kernels": t_m3_kernels,
     "m3_bandwidth": t_m3_bandwidth,
     "m3_e2e": t_m3_e2e,

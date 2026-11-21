@@ -247,8 +247,10 @@ def make_block_hook(
                 w = torch.maximum(torch.minimum(wg, max_val), -max_val).view_as(w).to(w.dtype)
             qw = QuantizedWeight.from_float(w, spec)
             lin.weight.data = qw.dequantize(w.dtype)
-            if results is not None:
-                results[f"layers.{i}.{n}"] = qw
+            if results is not None:  # keep the integer form in CPU memory, like GPTQ's results
+                results[f"layers.{i}.{n}"] = QuantizedWeight(
+                    qw.codes.cpu(), qw.scale.cpu(), qw.zero.cpu(), qw.spec
+                )
         del x
 
     return hook

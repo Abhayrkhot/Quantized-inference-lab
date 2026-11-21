@@ -4,7 +4,7 @@ model: Qwen/Qwen3-0.6B-Base
 dtype: bfloat16
 seqlen: 2048
 batch_size: 4
-task_batch_size: 16
+task_batch_size: 4  # 16 needs ~770 MB of logits per batch: too much for 4 GB
 offload: false
 datasets: []
 tasks: [arc_easy, arc_challenge, hellaswag, piqa, winogrande]

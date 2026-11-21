@@ -93,13 +93,15 @@ def save_fp8(model_name: str, out_dir: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="Qwen/Qwen3-0.6B-Base")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="results CSV (required unless --save-fp8)")
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--save-fp8", help="write an FP8-dynamic (W8A8) checkpoint here and exit")
     args = ap.parse_args()
     if args.save_fp8:
         return save_fp8(args.model, args.save_fp8)
+    if not args.out:
+        ap.error("--out is required")
 
     from datasets import Dataset
     from llmcompressor import oneshot

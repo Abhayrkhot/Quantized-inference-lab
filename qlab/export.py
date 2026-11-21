@@ -56,8 +56,11 @@ def _awq_unpack(words: torch.Tensor) -> torch.Tensor:
 def _as_parts(res: GPTQResult | QuantizedWeight):
     """(codes [N, K], scale [N, G], zero [N, G], g_idx [K] | None, spec)."""
     if isinstance(res, GPTQResult):
-        return res.codes, res.scale, res.zero, res.g_idx, res.spec
-    return res.codes, res.scale, res.zero, None, res.spec
+        parts = (res.codes, res.scale, res.zero, res.g_idx)
+    else:
+        parts = (res.codes, res.scale, res.zero, None)
+    codes, scale, zero, g_idx = (t.cpu() if t is not None else None for t in parts)
+    return codes, scale, zero, g_idx, res.spec
 
 
 def gptq_tensors(res, prefix: str) -> dict[str, torch.Tensor]:
@@ -99,7 +102,7 @@ def export(ckpt_path: str | Path, out_dir: str | Path, tokenizer_name: str, fmt:
     from safetensors.torch import save_file
     from transformers import AutoTokenizer
 
-    ck = torch.load(ckpt_path, weights_only=False)
+    ck = torch.load(ckpt_path, weights_only=False, map_location="cpu")
     spec: QuantSpec = ck["spec"]
     if fmt == "auto":
         fmt = "gptq" if spec.symmetric else "awq"
