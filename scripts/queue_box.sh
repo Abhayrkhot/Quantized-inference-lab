@@ -14,8 +14,25 @@ wait_quiet() {
   done
   echo "load still high: $(cat /proc/loadavg); continuing" >&2
 }
+# Run from a clean clone at one commit, so edits synced into the working copy while the queue
+# runs cannot change the code under it, and every result carries a clean git revision.
+# Results are copied back to the working copy after each stage.
+REPO=$(pwd)
+RUN=${QIL_RUN_DIR:-$HOME/qil-run}
+SHA=$(git rev-parse HEAD)
+[ -d "$RUN/.git" ] || git clone -q "$REPO" "$RUN"
+git -C "$RUN" fetch -q "$REPO" && git -C "$RUN" checkout -q --detach "$SHA"
+mkdir -p "$RUN/results" && rsync -a "$REPO/results/" "$RUN/results/"
+cd "$RUN"
+echo "== queue at $SHA in $RUN"
 for pid in "$LOGS"/*.pid; do [ -f "$pid" ] && while kill -0 "$(cat "$pid")" 2>/dev/null; do sleep 30; done; done
+wait_gpu_free() {  # another qlab container (e.g. a stage of an earlier queue) still running
+  while docker ps -q --filter ancestor=qil-dev:latest --filter ancestor=qil-ref:latest | grep -q .; do
+    sleep 30
+  done
+}
 for stage in "$@"; do
+  wait_gpu_free
   echo "== $stage $(date -Is) load $(cut -d' ' -f1 /proc/loadavg)"
   case $stage in
     m2) scripts/dev.sh 'scripts/run_m2.sh methods' ;;
@@ -28,5 +45,7 @@ for stage in "$@"; do
     m4) wait_quiet; scripts/dev.sh scripts/run_m4.sh ;;
     *) echo "unknown stage $stage"; exit 2 ;;
   esac
-  echo "== $stage exit $? $(date -Is)"
+  rc=$?
+  rsync -a "$RUN/results/" "$REPO/results/"
+  echo "== $stage exit $rc $(date -Is)"
 done

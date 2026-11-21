@@ -61,14 +61,6 @@ def _get(block: nn.Module, name: str) -> nn.Module:
     return block.get_submodule(name)
 
 
-def _forward(module: nn.Module, x: torch.Tensor, kwargs: dict, chunk: int) -> torch.Tensor:
-    outs = []
-    for s in range(0, x.shape[0], chunk):
-        y = module(x[s : s + chunk], **kwargs) if kwargs else module(x[s : s + chunk])
-        outs.append(y[0] if isinstance(y, tuple) else y)
-    return torch.cat(outs)
-
-
 @torch.no_grad()
 def search_scale(
     block: nn.Module,
@@ -78,19 +70,30 @@ def search_scale(
     spec: QuantSpec,
     n_grid: int = 20,
     chunk: int = 16,
+    device=None,
 ) -> tuple[torch.Tensor, float]:
-    """Best per-input-channel scale for ``group`` and the alpha that produced it."""
+    """Best per-input-channel scale for ``group`` and the alpha that produced it.
+
+    ``x`` (the group's input, possibly on CPU) is moved to ``device`` once. The reference
+    output is kept in fp32, and each grid point's error is accumulated chunk by chunk, so the
+    peak is the input plus one fp32 output, not two.
+    """
+    device = device or x.device
     lins = [_get(block, n) for n in group.linears]
     inspect = _get(block, group.inspect) if group.inspect else None
     attn_kwargs = kwargs if group.inspect == "self_attn" else {}
+    xg = x.to(device)
 
-    def out_of(xx):
+    def out_chunk(xx):
         if inspect is not None:
-            return _forward(inspect, xx, attn_kwargs, chunk)
-        return torch.cat([_forward(lin, xx, {}, chunk) for lin in lins], dim=-1)
+            y = inspect(xx, **attn_kwargs) if attn_kwargs else inspect(xx)
+            return y[0] if isinstance(y, tuple) else y
+        return torch.cat([lin(xx) for lin in lins], dim=-1)
 
-    target = out_of(x).float()
-    x_mean = x.abs().reshape(-1, x.shape[-1]).float().mean(0)
+    starts = range(0, xg.shape[0], chunk)
+    target = [out_chunk(xg[i : i + chunk]).float() for i in starts]
+    n_vals = sum(t.numel() for t in target)
+    x_mean = xg.abs().reshape(-1, xg.shape[-1]).float().mean(0)
     originals = [lin.weight.data.clone() for lin in lins]
     best = (float("inf"), None, 0.0)
     for k in range(n_grid):
@@ -99,7 +102,10 @@ def search_scale(
         s = s / (s.max() * s.min()).sqrt()
         for lin, w in zip(lins, originals, strict=True):
             lin.weight.data = (fake_quant(w.float() * s, spec) / s).to(w.dtype)
-        err = float((out_of(x).float() - target).pow(2).mean())
+        sq = 0.0
+        for i, t in zip(starts, target, strict=True):
+            sq += float((out_chunk(xg[i : i + chunk]).float() - t).pow(2).sum())
+        err = sq / n_vals
         if err < best[0]:
             best = (err, s.clone(), alpha)
     for lin, w in zip(lins, originals, strict=True):
@@ -176,22 +182,33 @@ def make_block_hook(
 
     def hook(i: int, block: nn.Module, inputs: BlockInputs) -> None:
         lins = block_linears(block)
+        # Inputs are kept in CPU memory: all seven linears' inputs for 128 x 512 tokens do not
+        # fit beside the model on a 4 GB card. q/k/v (and gate/up) read the same tensor; it
+        # is copied once (identity check against the last input seen, which is kept alive).
         feats: dict[str, list[torch.Tensor]] = {n: [] for n in lins}
-        handles = [
-            lins[n].register_forward_pre_hook(lambda _m, a, n=n: feats[n].append(a[0].detach()))
-            for n in lins
-        ]
+        last: list = [None, None]
+
+        def record(name):
+            def h(_m, a):
+                t = a[0].detach()
+                if t is not last[0]:
+                    last[0], last[1] = t, t.to("cpu")
+                feats[name].append(last[1])
+
+            return h
+
+        handles = [lins[n].register_forward_pre_hook(record(n)) for n in lins]
         try:
             for h, kw in zip(inputs.hidden, inputs.kwargs, strict=True):
                 block(h.to(device), **_to(kw, device))
+                last[0] = last[1] = None
         finally:
             for hd in handles:
                 hd.remove()
-        # q/k/v (and gate/up) read the same tensor: concatenate each distinct input once.
         x: dict[str, torch.Tensor] = {}
         by_id: dict[int, torch.Tensor] = {}
         for n, v in feats.items():
-            key = id(v[0])
+            key = id(v[0])  # CPU tensors are held in the lists, so ids are not reused
             if key not in by_id:
                 by_id[key] = torch.cat(v)
             x[n] = by_id[key]
@@ -209,18 +226,22 @@ def make_block_hook(
             ):
                 continue  # v_proj -> o_proj under grouped-query attention: shapes differ
             xin = x[g.linears[0]]
-            s, alpha = search_scale(block, g, xin, kwargs, spec, n_grid, chunk)
+            s, alpha = search_scale(block, g, xin, kwargs, spec, n_grid, chunk, device)
             apply_scale(block, g, s)
-            scaled = (xin.float() / s).to(xin.dtype)  # inputs of the scaled linears shrink by s
+            s_cpu = s.cpu()
+            scaled = (xin.float() / s_cpu).to(xin.dtype)  # the scaled linears' inputs shrink by s
             for n in g.linears:
                 x[n] = scaled
             del xin
+            torch.cuda.empty_cache()
             if log is not None:
                 log.append((f"layers.{i}.{g.prev}", alpha))
         for n, lin in lins.items():
             w = lin.weight.data
             if clip and n not in NO_CLIP:
-                max_val = search_clip(w, x[n], spec)
+                xs = x[n].reshape(-1, x[n].shape[-1])
+                xs = xs[:: max(1, xs.shape[0] // 512)][:512].to(w.device)
+                max_val = search_clip(w, xs, spec)
                 ng = max_val.shape[1]
                 wg = w.float().view(w.shape[0], ng, -1)
                 w = torch.maximum(torch.minimum(wg, max_val), -max_val).view_as(w).to(w.dtype)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import time
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -322,6 +323,7 @@ def run_config(
             "params": json.dumps({**run.params, **info}, sort_keys=True)
             if run.params or info
             else "",
+            "git": os.environ.get("QIL_GIT_SHA", "unknown"),
         }
         rows.append(row)
         write_rows(out, rows, meta)
