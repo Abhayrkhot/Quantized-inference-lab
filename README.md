@@ -23,8 +23,8 @@ files disagree.
 | M1 | Perplexity evaluation on a real model; RTN baselines; activation outliers; block offload | done |
 | M2 | GPTQ, AWQ, SmoothQuant, FP8 / NF4, KV-cache quantization, checked against llm-compressor | done on the box; cross-check running |
 | M3 | Triton W4A16 kernel vs cuBLAS, vLLM Marlin and bitsandbytes | done on the box |
-| M4 | Export to GPTQ / AWQ checkpoints; vLLM perplexity parity and serving benchmarks | code done, runs pending |
-| M5 | The same pipeline on Qwen3-8B on A100 / H200 | not started |
+| M4 | Export to GPTQ / AWQ checkpoints; vLLM perplexity parity and serving benchmarks | done on the box |
+| M5 | The same pipeline on Qwen3-8B on an H200 | submitted |
 
 Development runs on a laptop RTX 3050 Ti (4 GB, Ampere) with Qwen3-0.6B and, through block
 offload, Qwen3-1.7B and 4B. The final runs (M5) repeat the same scripts on datacenter GPUs,
@@ -408,13 +408,32 @@ from prompt log-probabilities, must match qlab's evaluation of the same run.
 _Not run yet._
 <!-- qlab:end m4_parity -->
 
+The exports load through vLLM's own loader and kernels (GPTQ-Marlin, AWQ-Marlin), and
+their perplexity matches qlab's evaluation of the same runs.
+
 Serving uses `vllm serve` with a fixed prompt, 128 generated tokens per request and streamed
 responses, 60 s per concurrency level. The load generator is the one from the
-inference-control-plane project.
+inference-control-plane project. On a 4 GB card, memory not spent on weights goes to the KV
+cache. The 4-bit checkpoints therefore hold far more tokens of context in flight than BF16,
+which shows at high concurrency.
 
 <!-- qlab:begin m4_serve -->
 _Not run yet._
 <!-- qlab:end m4_serve -->
+
+### A 4B model on a 4 GB laptop GPU
+
+Qwen3-4B-Base needs about 8 GB in BF16, twice this card's memory. GPTQ through block offload
+quantizes it on the same card, one decoder block at a time. The symmetric 4-bit export then
+serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load.
+
+<!-- qlab:begin m4_qwen3_4b -->
+_Not run yet._
+<!-- qlab:end m4_qwen3_4b -->
+
+<!-- qlab:begin m4_serve_4b -->
+_Not run yet._
+<!-- qlab:end m4_serve_4b -->
 
 ## Running it
 

@@ -11,6 +11,8 @@ export PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1  # ~/.loc
 export TRANSFORMERS_VERBOSITY=error HF_DATASETS_DISABLE_PROGRESS_BARS=1
 export no_proxy=localhost,127.0.0.1${no_proxy:+,$no_proxy} NO_PROXY=localhost,127.0.0.1${NO_PROXY:+,$NO_PROXY}
 export QIL_HOST=$(hostname -s)
+# The scratch copy is a `git archive` of one commit, recorded in GIT_SHA next to the code.
+export QIL_GIT_SHA=${QIL_GIT_SHA:-$(cat "${SLURM_SUBMIT_DIR:-.}/GIT_SHA" 2>/dev/null || echo unknown)}
 mkdir -p "$QIL_DATA/logs" "$HF_HOME" "$XDG_CACHE_HOME"
 # The image's CUDA 13 user-mode driver needs driver >= 580; older nodes use its compat libs.
 DRIVER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1 || true)
