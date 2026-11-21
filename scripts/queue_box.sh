@@ -41,7 +41,10 @@ for stage in "$@"; do
     m2) scripts/dev.sh 'scripts/run_m2.sh methods' ;;
     m2extra) scripts/dev.sh 'scripts/run_m2.sh extra' ;;
     m2ref) QIL_IMAGE=qil-ref:latest scripts/dev.sh \
-             'PYTHONUNBUFFERED=1 TRANSFORMERS_VERBOSITY=error python3 scripts/reference_llmc.py --out results/box/m2_reference.csv' ;;
+             'export PYTHONUNBUFFERED=1 TRANSFORMERS_VERBOSITY=error PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+              for r in baseline gptq_w4g128_asym gptq_w4g128_sym awq_w4g128_asym smoothquant_w8a8; do
+                python3 scripts/reference_llmc.py --only $r --out results/box/m2_reference.csv || rc=1
+              done; exit ${rc:-0}' ;;  # one process per recipe: llm-compressor keeps state between oneshot calls
     m3) wait_quiet; scripts/dev.sh scripts/run_m3.sh ;;
     m4ref) QIL_IMAGE=qil-ref:latest scripts/dev.sh \
              'TRANSFORMERS_VERBOSITY=error python3 scripts/reference_llmc.py --save-fp8 /data/export/qwen3-0.6b-fp8-dynamic' ;;

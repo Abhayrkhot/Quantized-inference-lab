@@ -135,6 +135,7 @@ def main() -> int:
                 recipe=make(),
                 max_seq_length=seqlen,
                 num_calibration_samples=calib.shape[0],
+                sequential_offload_device="cpu",  # cached calibration activations off the GPU
             )
         t_quant = time.perf_counter() - t0
         _to_gpu(model)
