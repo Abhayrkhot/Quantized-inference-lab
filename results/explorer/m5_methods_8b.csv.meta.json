@@ -1,0 +1,113 @@
+{
+  "config": {
+    "batch_size": 4,
+    "datasets": [
+      "wikitext2",
+      "c4"
+    ],
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-8B-Base",
+    "name": "m5_methods_8b",
+    "offload": false,
+    "runs": [
+      {
+        "method": "baseline"
+      },
+      {
+        "sweep": {
+          "bits": [
+            4,
+            3
+          ],
+          "granularity": [
+            "g128"
+          ],
+          "method": [
+            "rtn",
+            "gptq",
+            "awq"
+          ],
+          "symmetric": [
+            false
+          ]
+        }
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "gptq",
+        "save": "qwen3-8b/gptq-w4g128-sym.pt",
+        "symmetric": true
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "awq",
+        "save": "qwen3-8b/awq-w4g128-asym.pt",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "fmt": "nf4",
+        "granularity": "g64",
+        "method": "rtn"
+      },
+      {
+        "bits": 8,
+        "fmt": "fp8",
+        "granularity": "channel",
+        "method": "rtn"
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "bits": 8,
+        "granularity": "channel",
+        "method": "rtn",
+        "symmetric": true
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "alpha": 0.5,
+        "bits": 8,
+        "granularity": "channel",
+        "method": "smoothquant",
+        "symmetric": true
+      },
+      {
+        "kv_bits": 8,
+        "kv_mode": "token",
+        "method": "baseline"
+      },
+      {
+        "kv_bits": 4,
+        "kv_mode": "kivi",
+        "method": "baseline"
+      }
+    ],
+    "seqlen": 2048
+  },
+  "config_path": "configs/m5/methods_qwen3-8b.yaml",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "570.86.15",
+    "git": "fa91529",
+    "gpu": "NVIDIA H200",
+    "gpu_mem_gb": 139.81,
+    "host": "d4055",
+    "loadavg_1m": 16.05029296875,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "9.0",
+    "timestamp": "2026-11-21T07:31:09+00:00"
+  }
+}

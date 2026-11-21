@@ -1,0 +1,16 @@
+run,model,method,weights,acts,kv,kv_bytes_per_token,bits,granularity,symmetric,bits_per_weight,linear_mb,model_mb,wikitext2_ppl,c4_ppl,weight_rel_err,quant_s,eval_s,params,git
+baseline|16-bit|16-bit|,Qwen/Qwen3-8B-Base,baseline,16-bit,16-bit,16-bit,147456.0,16,,,16.0,13248.0,15622.59,7.0027,11.9127,,0.0,29.9,,fa91529
+rtn|int4 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,rtn,int4 g128 asym,16-bit,16-bit,147456.0,4,g128,False,4.1562,3441.38,5815.96,8.1691,14.2021,0.011000460435059808,0.5,28.3,,fa91529
+rtn|int3 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,rtn,int3 g128 asym,16-bit,16-bit,147456.0,3,g128,False,3.1484,2606.91,4981.49,11.9185,19.5782,0.05019487031099815,0.4,28.3,,fa91529
+gptq|int4 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,gptq,int4 g128 asym,16-bit,16-bit,147456.0,4,g128,False,4.1562,3441.38,5815.96,7.3166,12.2791,,382.4,28.2,"{""gptq_loss_sum"": 13721.55}",fa91529
+gptq|int3 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,gptq,int3 g128 asym,16-bit,16-bit,147456.0,3,g128,False,3.1484,2606.91,4981.49,8.5547,13.5795,,379.6,28.1,"{""gptq_loss_sum"": 63031.89}",fa91529
+awq|int4 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,awq,int4 g128 asym,16-bit,16-bit,147456.0,4,g128,False,4.1562,3441.38,5815.96,7.2701,12.3791,,142.7,28.2,"{""awq_alpha_mean"": 0.35}",fa91529
+awq|int3 g128 asym|16-bit|,Qwen/Qwen3-8B-Base,awq,int3 g128 asym,16-bit,16-bit,147456.0,3,g128,False,3.1484,2606.91,4981.49,8.4351,13.7896,,132.6,28.2,"{""awq_alpha_mean"": 0.34}",fa91529
+gptq|int4 g128 sym|16-bit|save=qwen3-8b/gptq-w4g128-sym.pt,Qwen/Qwen3-8B-Base,gptq,int4 g128 sym,16-bit,16-bit,147456.0,4,g128,True,4.125,3415.5,5790.09,7.4536,12.4102,,376.6,28.2,"{""gptq_loss_sum"": 19469.64, ""save"": ""qwen3-8b/gptq-w4g128-sym.pt""}",fa91529
+awq|int4 g128 asym|16-bit|save=qwen3-8b/awq-w4g128-asym.pt,Qwen/Qwen3-8B-Base,awq,int4 g128 asym,16-bit,16-bit,147456.0,4,g128,False,4.1562,3441.38,5815.96,7.2701,12.3791,,132.4,28.2,"{""awq_alpha_mean"": 0.35, ""save"": ""qwen3-8b/awq-w4g128-asym.pt""}",fa91529
+rtn|nf4 g64|16-bit|,Qwen/Qwen3-8B-Base,rtn,nf4 g64,16-bit,16-bit,147456.0,4,g64,False,4.25,3519.0,5893.59,7.4186,12.6634,0.008732320707557457,0.4,28.4,,fa91529
+rtn|fp8 channel|16-bit|,Qwen/Qwen3-8B-Base,rtn,fp8 channel,16-bit,16-bit,147456.0,8,channel,False,8.0032,6626.67,9001.26,7.0283,11.939,0.0007019518610803292,0.3,28.5,,fa91529
+rtn|int8 channel sym|int8 per-token|,Qwen/Qwen3-8B-Base,rtn,int8 channel sym,int8 per-token,16-bit,147456.0,8,channel,True,8.0032,6626.67,9001.26,7.4385,12.8058,0.0001146508813747907,0.4,44.7,,fa91529
+smoothquant|int8 channel sym|int8 per-token|alpha=0.5,Qwen/Qwen3-8B-Base,smoothquant,int8 channel sym,int8 per-token,16-bit,147456.0,8,channel,True,8.0032,6626.67,9001.26,7.3679,12.6652,,8.9,44.7,"{""alpha"": 0.5}",fa91529
+"baseline|16-bit|16-bit|kv_bits=8,kv_mode=token",Qwen/Qwen3-8B-Base,baseline,16-bit,16-bit,int8 token,76032.0,16,,,16.0,13248.0,15622.59,6.9984,11.9219,,0.0,30.0,"{""kv_bits"": 8, ""kv_mode"": ""token""}",fa91529
+"baseline|16-bit|16-bit|kv_bits=4,kv_mode=kivi",Qwen/Qwen3-8B-Base,baseline,16-bit,16-bit,int4 kivi,39168.0,16,,,16.0,13248.0,15622.59,7.0481,11.9757,,0.0,30.0,"{""kv_bits"": 4, ""kv_mode"": ""kivi""}",fa91529

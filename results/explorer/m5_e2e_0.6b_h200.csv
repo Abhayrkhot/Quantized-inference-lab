@@ -1,0 +1,3 @@
+model,weights,weights_mb,prompt_len,new_tokens,decode_ms_per_token,decode_tokens_per_s,prefill_ms,peak_mem_mb,tokens,speedup_vs_16bit
+Qwen/Qwen3-0.6B-Base,16-bit,1136.9,128,256,3.224,310.2,20.81,1256.9,92 220 16 15 15 15 15 15 15 15 15 15 15 15 15 15,
+Qwen/Qwen3-0.6B-Base,int4 g128 asym (qlab triton),515.1,128,256,3.031,329.9,33.87,639.7,60 220 16 15 15 15 15 15 15 15 15 15 15 15 15 15,1.06

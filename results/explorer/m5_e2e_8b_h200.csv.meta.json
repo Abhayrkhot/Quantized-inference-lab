@@ -1,0 +1,32 @@
+{
+  "args": {
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-8B-Base",
+    "new": 256,
+    "out": "results/explorer/m5_e2e_8b_h200.csv",
+    "prompt_len": 128,
+    "reps": 5
+  },
+  "environment": {
+    "cuda": "13.0",
+    "driver": "570.86.15",
+    "git": "fa91529",
+    "gpu": "NVIDIA H200",
+    "gpu_mem_gb": 139.81,
+    "host": "d4053",
+    "loadavg_1m": 9.5654296875,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "9.0",
+    "timestamp": "2026-11-21T07:03:03+00:00"
+  },
+  "script": "bench/e2e_decode.py"
+}

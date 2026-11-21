@@ -1,0 +1,38 @@
+{
+  "args": {
+    "concurrency": [
+      1,
+      16,
+      64
+    ],
+    "duration": 60,
+    "gpu_util": 0.9,
+    "max_model_len": 8192,
+    "max_tokens": 128,
+    "models": "/scratch/$USER/qil/data/serve_8b.json",
+    "out": "results/explorer/m5_serve_8b_h200.csv",
+    "startup_timeout": 900
+  },
+  "environment": {
+    "cuda": "13.0",
+    "driver": "570.86.15",
+    "git": "fa91529",
+    "gpu": "NVIDIA H200",
+    "gpu_mem_gb": 139.81,
+    "host": "d4055",
+    "loadavg_1m": 13.07568359375,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "9.0",
+    "timestamp": "2026-11-21T08:43:59+00:00"
+  },
+  "script": "bench/serve_bench.py"
+}

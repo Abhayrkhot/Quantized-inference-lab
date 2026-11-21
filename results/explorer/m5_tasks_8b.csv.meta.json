@@ -1,0 +1,73 @@
+{
+  "config": {
+    "batch_size": 4,
+    "datasets": [],
+    "dtype": "bfloat16",
+    "model": "Qwen/Qwen3-8B-Base",
+    "name": "m5_tasks_8b",
+    "offload": false,
+    "runs": [
+      {
+        "method": "baseline"
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "rtn",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "gptq",
+        "symmetric": false
+      },
+      {
+        "bits": 4,
+        "granularity": "g128",
+        "method": "awq",
+        "symmetric": false
+      },
+      {
+        "act_bits": 8,
+        "act_granularity": "token",
+        "alpha": 0.5,
+        "bits": 8,
+        "granularity": "channel",
+        "method": "smoothquant",
+        "symmetric": true
+      }
+    ],
+    "seqlen": 2048,
+    "task_batch_size": 32,
+    "tasks": [
+      "arc_easy",
+      "arc_challenge",
+      "hellaswag",
+      "piqa",
+      "winogrande"
+    ]
+  },
+  "config_path": "configs/m5/tasks_qwen3-8b.yaml",
+  "environment": {
+    "cuda": "13.0",
+    "driver": "570.86.15",
+    "git": "fa91529",
+    "gpu": "NVIDIA H200",
+    "gpu_mem_gb": 139.81,
+    "host": "d4055",
+    "loadavg_1m": 12.89208984375,
+    "packages": {
+      "datasets": "5.2.0",
+      "lm_eval": "0.4.13",
+      "numpy": "2.2.6",
+      "torch": "2.14.0",
+      "transformers": "5.22.2",
+      "triton": "3.8.0",
+      "vllm": "0.34.0"
+    },
+    "python": "3.12.3",
+    "sm": "9.0",
+    "timestamp": "2026-11-21T08:08:08+00:00"
+  }
+}

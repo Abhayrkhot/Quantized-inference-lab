@@ -606,8 +606,69 @@ def t_m5_smoke(root: Path) -> str:
     return _table(head, body) + "\n\n" + _source(root, rel_x)
 
 
+def t_headline(root: Path) -> str:
+    """One table of the headline numbers, each pulled from its results file."""
+    rows: list[list[str]] = []
+
+    def ppl_row(rel, model):
+        r = _rows(root, rel)
+        if not r:
+            return
+        get = {x["run"]: x for x in r}  # exact run keys: plain runs have no extra params
+        base = get.get("baseline|16-bit|16-bit|")
+        cells = []
+        for m, label in (("rtn", "RTN"), ("gptq", "GPTQ"), ("awq", "AWQ")):
+            x = get.get(f"{m}|int4 g128 asym|16-bit|")
+            if x:
+                cells.append(f"{label} {float(x['wikitext2_ppl']):.2f}")
+        if base and cells:
+            rows.append([f"{model}: WikiText-2 perplexity, int4 g128",
+                         f"BF16 {float(base['wikitext2_ppl']):.2f} · " + " · ".join(cells), f"`{rel}`"])
+
+    ppl_row("results/explorer/m5_methods_8b.csv", "Qwen3-8B")
+    ppl_row("results/box/m2_methods.csv", "Qwen3-0.6B")
+    ref, ours = _rows(root, "results/box/m2_reference.csv"), _rows(root, "results/box/m2_methods.csv")
+    if ref and ours:
+        r = next((x for x in ref if x["recipe"] == "gptq_w4g128_asym"), None)
+        o = next((x for x in ours if x["run"] == "gptq|int4 g128 asym|16-bit|"), None)
+        if r and o:
+            d = 100 * (float(o["wikitext2_ppl"]) - float(r["wikitext2_ppl"])) / float(r["wikitext2_ppl"])
+            rows.append(["GPTQ vs llm-compressor (same calibration and evaluation)",
+                         f"{d:+.2f}% WikiText-2 perplexity", "`results/box/m2_reference.csv`"])
+    par = _rows(root, "results/box/m4_vllm_ppl.csv")
+    if par:
+        worst = max(abs(float(x["diff_pct"])) for x in par if x.get("diff_pct"))
+        rows.append(["Exported checkpoints in vLLM vs qlab's evaluation",
+                     f"within {worst:.2f}% perplexity", "`results/box/m4_vllm_ppl.csv`"])
+    for rel, gpu in (("results/box/m3_kernels.csv", "RTX 3050 Ti"),
+                     ("results/explorer/m5_kernels_h200.csv", "H200")):
+        k = _rows(root, rel)
+        if not k:
+            continue
+        t = {(x["model"], int(x["K"]), int(x["N"]), int(x["M"]), x["kernel"]): float(x["us"]) for x in k}
+        shapes = BLOCK_SHAPES["qwen3-8b"]
+
+        def block(kernel, t=t, shapes=shapes):
+            return sum(t[("qwen3-8b", kk, nn, 1, kernel)] * c for (kk, nn), c in shapes.items())
+
+        rows.append([f"Triton W4A16, batch-1 decode, Qwen3-8B block ({gpu})",
+                     f"{block('bf16 cuBLAS') / block('qlab triton'):.2f}× vs 16-bit cuBLAS · "
+                     f"{block('vLLM marlin') / block('qlab triton sym'):.2f}× Marlin's speed", f"`{rel}`"])
+    s4 = _rows(root, "results/box/m4_serve_4b.csv")
+    if s4:
+        g = [x for x in s4 if "GPTQ" in x["label"] and not x.get("error") and x["concurrency"] == "1"]
+        if g:
+            rows.append(["Qwen3-4B on a 4 GB laptop GPU (BF16 does not fit)",
+                         f"GPTQ int4 served by vLLM at {float(g[0]['tokens_per_s']):.1f} tokens/s",
+                         "`results/box/m4_serve_4b.csv`"])
+    if not rows:
+        return "_Not run yet._"
+    return _table(["What", "Result", "Source"], rows)
+
+
 X = "results/explorer"
 TABLES: dict[str, Callable[[Path], str]] = {
+    "headline": t_headline,
     "m4_serve_4b": partial(t_m4_serve, rel="results/box/m4_serve_4b.csv"),
     "m4_qwen3_4b": partial(t_m2_17b, rel="results/box/m4_qwen3-4b.csv"),
     "m5_smoke": t_m5_smoke,
