@@ -287,7 +287,7 @@ memory. At 2 bits even KIVI degrades.
 | AWQ int4 g128 asym, no clip search | 14.251 | 14.245 | +0.05% | 22.143 | 22.165 | -0.10% |
 | SmoothQuant W8A8 α=0.5 | 12.884 | 12.890 | -0.05% | 20.216 | 20.236 | -0.10% |
 
-Same model, calibration windows and evaluation code; the llm-compressor runs use its own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same evaluation run in both images.
+Same model, calibration windows and evaluation code; the llm-compressor runs use its own image (llm-compressor 0.15.0, transformers 5.21.0). The BF16 row is the same evaluation run in both images. The symmetric gap is a convention difference: compressed-tensors scales symmetric weights by absmax / 7.5 and uses codes -8..7, while qlab uses absmax / 7 and codes -7..7, a 7% coarser step. Where the conventions agree (asymmetric), the implementations match.
 
 <sub>Source: `results/box/m2_reference.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git 12a2b40 · 2026-11-21</sub>
 <!-- qlab:end m2_reference -->
@@ -483,11 +483,72 @@ serves with vLLM's GPTQ-Marlin kernel, where the BF16 model cannot load. It need
 | Checkpoint | Weights GiB | KV cache tokens | Concurrency | TTFT p50 ms | TPOT p50 ms | Output tokens/s | Errors |
 |---|---|---|---|---|---|---|---|
 | Qwen3-4B bf16 | – | – | – | – | – | – | does not fit: CUDA out of memory while starting vLLM |
-| Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager) | 2.5 | 4,032 | 1 | 37 | 18.12 | 54.7 | 0 |
-| Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager) | 2.5 | 4,032 | 8 | 111 | 32.86 | 249.5 | 0 |
+| Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager) | 2.5 | 4,032 | 1 | 36 | 18.12 | 54.7 | 0 |
+| Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager) | 2.5 | 4,032 | 8 | 108 | 32.29 | 283.4 | 0 |
 
-<sub>Source: `results/box/m4_serve_4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git ee62189-dirty · 2026-11-21</sub>
+<sub>Source: `results/box/m4_serve_4b.csv` · NVIDIA GeForce RTX 3050 Ti Laptop GPU · torch 2.14.0 · git f55f2cb · 2026-11-21</sub>
 <!-- qlab:end m4_serve_4b -->
+
+## M5: Qwen3-8B on an H200
+
+**Same environment as the box.** The same scripts run on Explorer, Northeastern's cluster,
+inside the same vLLM release (`vllm/vllm-openai:v0.34.0`, from the same source revision),
+with the same pinned extras in a venv on top. Each Slurm job runs the full test suite on its
+GPU first.
+
+**A smoke job gates everything else.** It reruns two box configurations on Qwen3-0.6B and
+fails unless perplexity matches the box within 0.5%; the long 8B jobs depend on it:
+
+<!-- qlab:begin m5_smoke -->
+| Run (Qwen3-0.6B) | Box WikiText-2 | H200 WikiText-2 | Δ | Box C4 | H200 C4 | Δ |
+|---|---|---|---|---|---|---|
+| BF16 16-bit | 12.669 | 12.669 | +0.00% | 19.889 | 19.891 | +0.01% |
+| GPTQ int4 g128 asym | 14.775 | 14.730 | -0.31% | 23.042 | 23.023 | -0.09% |
+
+<sub>Source: `results/explorer/m5_smoke.csv` · NVIDIA H200 · torch 2.14.0 · git fa91529 · 2026-11-21</sub>
+<!-- qlab:end m5_smoke -->
+
+### Methods on Qwen3-8B
+
+<!-- qlab:begin m5_methods -->
+_Not run yet._
+<!-- qlab:end m5_methods -->
+
+<!-- qlab:begin m5_w8a8 -->
+_Not run yet._
+<!-- qlab:end m5_w8a8 -->
+
+<!-- qlab:begin m5_kv -->
+_Not run yet._
+<!-- qlab:end m5_kv -->
+
+### Zero-shot accuracy on Qwen3-8B
+
+lm-eval 0.4.13, zero-shot, on the in-memory quantized model:
+
+<!-- qlab:begin m5_tasks -->
+_Not run yet._
+<!-- qlab:end m5_tasks -->
+
+### Kernels on the H200
+
+<!-- qlab:begin m5_kernels_h200 -->
+_Not run yet._
+<!-- qlab:end m5_kernels_h200 -->
+
+<!-- qlab:begin m5_e2e -->
+_Not run yet._
+<!-- qlab:end m5_e2e -->
+
+### Serving Qwen3-8B with vLLM
+
+<!-- qlab:begin m5_parity -->
+_Not run yet._
+<!-- qlab:end m5_parity -->
+
+<!-- qlab:begin m5_serve -->
+_Not run yet._
+<!-- qlab:end m5_serve -->
 
 ## Running it
 

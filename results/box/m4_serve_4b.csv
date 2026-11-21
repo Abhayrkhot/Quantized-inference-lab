@@ -1,0 +1,4 @@
+label,model,error,server_args,kv_cache_tokens,max_concurrency_at_len,weights_gib,vllm_quantization,gpu_mem_used_mb,concurrency,max_tokens,seconds,requests,errors,first_error,requests_per_s,tokens_per_s,p50_s,p90_s,p95_s,p99_s,ttft_p50_s,ttft_p90_s,ttft_p95_s,ttft_p99_s,tpot_p50_ms,tpot_p90_ms,tpot_p95_ms,tpot_p99_ms
+Qwen3-4B bf16,Qwen/Qwen3-4B-Base,does not fit: CUDA out of memory while starting vLLM,,,,,,,,,,,,,,,,,,,,,,,,,,
+"Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager)",/data/export/qwen3-4b-gptq-w4g128-sym,,--enforce-eager --kv-cache-memory 600000000,4032,3.94,2.5,auto_gptq,3580.0,1,128,60.8,26,0,,0.43,54.7,2.337,2.345,2.349,2.361,0.0361,0.0389,0.0402,0.0481,18.12,18.16,18.21,18.22
+"Qwen3-4B qlab GPTQ int4 (GPTQ-Marlin, eager)",/data/export/qwen3-4b-gptq-w4g128-sym,,--enforce-eager --kv-cache-memory 600000000,4032,3.94,2.5,auto_gptq,3580.0,8,128,61.4,136,0,,2.21,283.4,4.208,4.559,4.597,4.601,0.1075,0.1187,0.1244,0.1334,32.29,35.0,35.28,35.31
